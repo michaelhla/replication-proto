@@ -290,6 +290,18 @@ def match(query):
     return message
 
 
+def serverthread(conn):
+    while True:
+        try:
+            server_message = conn.recv(1048)
+            print(server_message)
+        except Exception as e:
+            print(e)
+
+
+servers = [('localhost', 9000), ('localhost', 9001), ('localhost', 9002)]
+servers.remove((IP_address, port))
+
 while True:
 
     """Accepts a connection request and stores two parameters,
@@ -297,17 +309,29 @@ while True:
     which contains the IP address of the client that just
     connected"""
     conn, addr = server.accept()
+    if conn.getpeername() in servers:
+        servers.remove(conn.getpeername())
+        start_new_thread(serverthread, (conn))
+    else:
+        """Maintains a list of clients for ease of broadcasting
+        a message to all available people in the chatroom"""
+        list_of_clients.append(conn)
 
-    """Maintains a list of clients for ease of broadcasting
-    a message to all available people in the chatroom"""
-    list_of_clients.append(conn)
+        # prints the address of the user that just connected
+        print(addr[0] + " connected")
 
-    # prints the address of the user that just connected
-    print(addr[0] + " connected")
+        # creates and individual thread for every user
+        # that connects
+        start_new_thread(clientthread, (conn, addr))
 
-    # creates and individual thread for every user
-    # that connects
-    start_new_thread(clientthread, (conn, addr))
+    for connserv in servers:
+        if connserv != (IP_address, port):
+            try:
+                server.connect((connserv[0], connserv[1]))
+                start_new_thread(serverthread, (server))
+            except Exception as e:
+                continue
+
 
 conn.close()
 server.close()
