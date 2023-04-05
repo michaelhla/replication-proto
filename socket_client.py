@@ -2,6 +2,7 @@
 import socket
 import select
 import sys
+import random
 
 MAX_MESSAGE_LENGTH = 280
 MAX_RECIPIENT_LENGTH = 50
@@ -10,15 +11,16 @@ server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 if len(sys.argv) != 3:
     print("Correct usage: script, IP address, port number")
     exit()
-IP_address = str(sys.argv[1])
-Port = int(sys.argv[2])
+servers = [('localhost', 9000), ('localhost', 9001), ('localhost', 9002)]
+index = random.randint(0, 2)
+IP_address = servers[index][0]
+Port = servers[index][1]
 server.connect((IP_address, Port))
 
 
 # Keywords that client side parses and tags to send to the server
 MESSAGE_KEYS = ['Create Account', 'Login', 'Logout',
                 'Delete Account', 'Send', 'List Accounts']
-
 
 
 # always returns encoded message
@@ -28,7 +30,7 @@ def process(message, client_logged_in):
 
     # CREATE ACCOUNT
     if message.find('Create Account') == 0:
-        #Can't create an account once logged in
+        # Can't create an account once logged in
         if client_logged_in == True:
             print("Please logout to create an account.")
             return
@@ -42,11 +44,11 @@ def process(message, client_logged_in):
                 name_max = True
             else:
                 print("All usernames must be at most " +
-                    str(MAX_RECIPIENT_LENGTH) + " characters. Please try again.")
+                      str(MAX_RECIPIENT_LENGTH) + " characters. Please try again.")
         message = name
         message = message.encode()
         tag = (0).to_bytes(1, "big")
-    
+
     # LOGIN
     elif message.find('Login') == 0:
         # Can't login if already logged in
@@ -60,7 +62,7 @@ def process(message, client_logged_in):
 
     # LOGOUT
     elif message.find('Logout') == 0:
-        #Can't log out if already logged out
+        # Can't log out if already logged out
         if client_logged_in == False:
             print("Currently logged out. Please create an account or login.")
             return
@@ -78,7 +80,7 @@ def process(message, client_logged_in):
         message = message.encode()
         tag = (3).to_bytes(1, "big")
 
-    #SEND
+    # SEND
     elif message.find("Send") == 0:
         # Can only send if logged in
         if client_logged_in == False:
@@ -140,6 +142,7 @@ def process(message, client_logged_in):
     bmsg = tag + message
     return bmsg
 
+
 # global state of logged in that changes according to server sending updates on login/logout status
 global client_logged_in
 client_logged_in = False
@@ -159,7 +162,6 @@ while True:
     condition will evaluate as true"""
     read_sockets, write_socket, error_socket = select.select(
         sockets_list, [], [])
-    
 
     for socks in read_sockets:
         if socks == server:
@@ -184,5 +186,3 @@ while True:
                 except:
                     print('Message could not send.')
 server.close()
-
-

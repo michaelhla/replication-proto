@@ -6,6 +6,7 @@ import sys
 from _thread import *
 from threading import Lock
 import re
+import csv
 
 
 """The first argument AF_INET is the address domain of the
@@ -45,6 +46,30 @@ dict_lock = Lock()
 
 # message queues per username
 message_queue = {}
+
+# DB OPERATIONS
+
+# USERFILEPATH = ""
+# MSGFILEPATH = ""
+
+# try:
+#     with open(USERFILEPATH, mode='r') as csv_file:
+#         csv_reader = csv.DictReader(csv_file)
+#         client_dictionary = {}
+#         for row in csv_reader:
+#             key = row['key_column_name']
+#             client_dictionary[key] = row
+# except FileNotFoundError:
+#     print("user db not found")
+
+# try:
+#     with open(MSGFILEPATH, mode='r') as csv_file:
+#         writer = csv.writer(csv_file)
+#         row = [sender,receiver,message]
+#         # Write the new row to the CSV file
+#         writer.writerow(message)
+# except FileNotFoundError:
+#     print("message db not found")
 
 
 def clientthread(conn, addr):
@@ -253,7 +278,7 @@ def clientthread(conn, addr):
                 else:
                     """message may have no content if the connection
                     is broken, in this case we remove the connection"""
-                    remove(conn, username)
+                    removeconn(conn, username)
                     logged_in = False
                     client_state = False
 
@@ -268,7 +293,7 @@ def logout(username):
     dict_lock.release()
 
 
-def remove(connection, username):
+def removeconn(connection, username):
     # If connection breaks, automatically logs username out
     logout(username)
     if connection in list_of_clients:
