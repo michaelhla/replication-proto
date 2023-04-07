@@ -5,13 +5,19 @@ from _thread import *
 from threading import Lock
 import re
 import threading
-
+import csv
 
 NUM_MACHINES = 3
 ADDR_1 = ""
 ADDR_2 = ""
 ADDR_3 = ""
 
+# IP address is first argument
+IP_address = str(sys.argv[1])
+
+
+# Port number is second argument
+port = int(sys.argv[2])
 
 # maintains a list of potential clients
 list_of_clients = []
@@ -25,10 +31,7 @@ list_of_replicas = []
 
 
 # replica dictionary, keyed by address and valued at machine id
-replica_dictionary = {ADDR_1 : 1, ADDR_2 : 2, ADDR_3 : 3}
-
-# lock for dictionary
-dict_lock = Lock()
+replica_dictionary = {ADDR_1: 1, ADDR_2: 2, ADDR_3: 3}
 
 # message queues per username
 message_queue = {}
@@ -36,6 +39,16 @@ message_queue = {}
 # defined global variable of whether replica is primary or backup
 global is_Primary
 is_Primary = False
+
+# caches for db operations
+msgcache = {}
+usercache = {}
+
+# locks
+dict_lock = Lock()  # client dict
+msg_cache_lock = Lock()
+user_cache_lock = Lock()
+
 
 def serverthread(IP, port):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -51,28 +64,76 @@ def serverthread(IP, port):
             try:
                 msg = prim_conn.recv(2048)
                 if msg:
-                    #handle message
+                    # handle message
                     pass
                 else:
-                    #server broken, red
+                    # server broken, red
                     pass
             except Exception as e:
                 print(e)
                 continue
 
         while is_Primary == True:
-            #running client thread on primary server
+            # running client thread on primary server
             conn, addr = server.accept()
             print(addr[0] + " connected")
-            if conn #is a reconnecting replica:
-                #redefine primary
+            if conn  # is a reconnecting replica:
+            # redefine primary
             else:
                 list_of_clients.append(conn)
                 # creates an individual thread for each machine that connects
                 start_new_thread(clientthread, (conn, addr))
 
+# DB OPERATIONS
 
 
+USERFILEPATH = ""
+MSGFILEPATH = ""
+
+
+def load_db_to_state(path):
+    try:
+        with open(path, mode='r') as csv_file:
+            csv_reader = csv.DictReader(csv_file)
+            client_dictionary = {}
+            for row in csv_reader:
+                key = row['key_column_name']
+                client_dictionary[key] = row
+    except FileNotFoundError:
+        print("user db not found")
+    return client_dictionary
+
+
+def dump_cache(path, cache):
+    try:
+        with open(path, 'a', newline='') as file:
+            # Define the fieldnames for the CSV
+            fieldnames = cache.keys()
+
+            # Create the DictWriter object
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+
+            # Write the header row if the file is empty
+            if file.tell() == 0:
+                writer.writeheader()
+
+            # Iterate over the dictionary of dictionaries
+            for key1, inner_dict in cache.items():
+                for row in inner_dict.values():
+                    # Add the key1 to the row dictionary
+                    row['key1'] = key1
+
+                    # Write the row to the CSV file
+                    writer.writerow(row)
+            cache = {}
+    except FileNotFoundError:
+        print("db not found")
+
+
+def add_to_cache(item, cache, lock):
+    lock.acquire(timeout=10)
+    cache.add(item)
+    lock.release()
 
 
 # for backup servers, updates server state as if it were interacting with the client, but without sending
@@ -109,14 +170,16 @@ def handle_message(message, tag=None):
         # sending messages
 
         length_of_recep = message[2+length_of_username]  # convert to int
-        recep_username = message[3+length_of_username:3+length_of_username+length_of_recep].decode()
+        recep_username = message[3+length_of_username:3 +
+                                 length_of_username+length_of_recep].decode()
 
         dict_lock.acquire(timeout=10)
         # Checks if recipeint is actually a possible recipient
         if recep_username not in client_dictionary.keys():
             pass
         else:
-            text_message = message[3+length_of_username+length_of_recep:].decode()
+            text_message = message[3+length_of_username +
+                                   length_of_recep:].decode()
             # Checks if recipient logged out
             if client_dictionary[recep_username] == 0:
                 message_queue[recep_username].append(
@@ -128,7 +191,7 @@ def handle_message(message, tag=None):
                 pass
         dict_lock.release()
 
-    if tag == 5: 
+    if tag == 5:
         # notification that message queue has been read from
         dict_lock.acquire(timeout=10)
         # TO DO: for message in message_queue, persistent store the successfully sent message
@@ -137,15 +200,12 @@ def handle_message(message, tag=None):
         message_queue[username] = 0
         # TO DO: overwrite the persistent store state of the new current message_queue
         dict_lock.release()
-        
-    if tag == 6: 
+
+    if tag == 6:
         # no state change for a lookup request
         pass
 
-        
 
-
-                
 # To Do: send connections the messages as the client sends them in, with adjusted wire protocol
 def clientthread(conn, addr):
 
@@ -170,7 +230,6 @@ def clientthread(conn, addr):
                 message = conn.recv(2048)
                 # Send to remaining replica servers
 
-                
                 # check if message is of type create account or login
                 # wire protocol demands initial byte is either 0 (create) or 1 (login) here
                 # tag = int.from_bytes(message[0], "big")
@@ -391,4 +450,3 @@ def match(query):
         message = 'Regex Error'
 
     return message
-
