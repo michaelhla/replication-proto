@@ -1,45 +1,31 @@
-# Python program to implement server side of chat room.
 import socket
 import select
 import sys
-'''Replace "thread" with "_thread" for python 3'''
 from _thread import *
 from threading import Lock
 import re
-import csv
+import threading
 
 
-"""The first argument AF_INET is the address domain of the
-socket. This is used when we have an Internet Domain with
-any two hosts The second argument is the type of socket.
-SOCK_STREAM means that data or characters are read in
-a continuous flow."""
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+NUM_MACHINES = 3
+ADDR_1 = ""
+ADDR_2 = ""
+ADDR_3 = ""
 
-if len(sys.argv) != 3:
-    print("Correct usage: script, IP address, port number")
-    exit()
-
-# IP address is first argument
-IP_address = str(sys.argv[1])
-
-
-# Port number is second argument
-port = int(sys.argv[2])
-
-# Server initialized at input IP address and port
-server.bind((IP_address, port))
-
-server.listen()
 
 # maintains a list of potential clients
 list_of_clients = []
 
-
 # client username dictionary, with login status: 0 if logged off, corresponding address if logged in
 client_dictionary = {}
 
+
+# maintains list of active replicas
+list_of_replicas = []
+
+
+# replica dictionary, keyed by address and valued at machine id
+replica_dictionary = {ADDR_1 : 1, ADDR_2 : 2, ADDR_3 : 3}
 
 # lock for dictionary
 dict_lock = Lock()
@@ -47,31 +33,120 @@ dict_lock = Lock()
 # message queues per username
 message_queue = {}
 
-# DB OPERATIONS
+# defined global variable of whether replica is primary or backup
+global is_Primary
+is_Primary = False
 
-# USERFILEPATH = ""
-# MSGFILEPATH = ""
+def serverthread(IP, port):
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((IP, port))
+    server.listen()
 
-# try:
-#     with open(USERFILEPATH, mode='r') as csv_file:
-#         csv_reader = csv.DictReader(csv_file)
-#         client_dictionary = {}
-#         for row in csv_reader:
-#             key = row['key_column_name']
-#             client_dictionary[key] = row
-# except FileNotFoundError:
-#     print("user db not found")
+    # catch up on logs, and determine primary by connections
 
-# try:
-#     with open(MSGFILEPATH, mode='r') as csv_file:
-#         writer = csv.writer(csv_file)
-#         row = [sender,receiver,message]
-#         # Write the new row to the CSV file
-#         writer.writerow(message)
-# except FileNotFoundError:
-#     print("message db not found")
+    while True:
+        # backup server loop
+        while is_Primary == False:
+            try:
+                msg = prim_conn.recv(2048)
+                if msg:
+                    #handle message
+                    pass
+                else:
+                    #server broken, red
+                    pass
+            except Exception as e:
+                print(e)
+                continue
+
+        while is_Primary == True:
+            #running client thread on primary server
+            conn, addr = server.accept()
+            print(addr[0] + " connected")
+            if conn #is a reconnecting replica:
+                #redefine primary
+            else:
+                list_of_clients.append(conn)
+                # creates an individual thread for each machine that connects
+                start_new_thread(clientthread, (conn, addr))
 
 
+
+
+
+# for backup servers, updates server state as if it were interacting with the client, but without sending
+def handle_message(message, tag=None):
+    tag = message[0]
+    # Wire protocol for replica interaction is different; need to read out the username relevant to the state change first
+    length_of_username = message[1]
+    username = message[2:2+length_of_username].decode()
+
+    if tag == 0:
+        # acquire lock for client_dictionary, with timeout in case of failure
+        dict_lock.acquire(timeout=10)
+        if username in client_dictionary.keys():
+            pass
+        else:
+            # backup stores username as logged off, as we will automatically log off clients when the server crashes
+            client_dictionary[username] = 0
+            message_queue[username] = []
+        dict_lock.release()
+
+    if tag == 1:
+        # we pass here, because a login doesn't change necessary state of the backup server, as the client will have to log in if the primary fails
+        pass
+    if tag == 2:
+        # similar to above, logouts do not affect backup state
+        pass
+    if tag == 3:
+        # deletes the username from backup server state
+        dict_lock.acquire(timeout=10)
+        client_dictionary.pop(username)
+        message_queue.pop(username)
+        dict_lock.release()
+    if tag == 4:
+        # sending messages
+
+        length_of_recep = message[2+length_of_username]  # convert to int
+        recep_username = message[3+length_of_username:3+length_of_username+length_of_recep].decode()
+
+        dict_lock.acquire(timeout=10)
+        # Checks if recipeint is actually a possible recipient
+        if recep_username not in client_dictionary.keys():
+            pass
+        else:
+            text_message = message[3+length_of_username+length_of_recep:].decode()
+            # Checks if recipient logged out
+            if client_dictionary[recep_username] == 0:
+                message_queue[recep_username].append(
+                    [username, text_message])
+
+            # If logged in, look up connection in dictionary
+            else:
+                # TO DO: Persistent store the successfully sent message
+                pass
+        dict_lock.release()
+
+    if tag == 5: 
+        # notification that message queue has been read from
+        dict_lock.acquire(timeout=10)
+        # TO DO: for message in message_queue, persistent store the successfully sent message
+
+        # current active message_queue is empty in backup state
+        message_queue[username] = 0
+        # TO DO: overwrite the persistent store state of the new current message_queue
+        dict_lock.release()
+        
+    if tag == 6: 
+        # no state change for a lookup request
+        pass
+
+        
+
+
+                
+# To Do: send connections the messages as the client sends them in, with adjusted wire protocol
 def clientthread(conn, addr):
 
     client_state = True
@@ -93,6 +168,9 @@ def clientthread(conn, addr):
         while logged_in == False:
             try:
                 message = conn.recv(2048)
+                # Send to remaining replica servers
+
+                
                 # check if message is of type create account or login
                 # wire protocol demands initial byte is either 0 (create) or 1 (login) here
                 # tag = int.from_bytes(message[0], "big")
@@ -314,49 +392,3 @@ def match(query):
 
     return message
 
-
-def serverthread(conn):
-    while True:
-        try:
-            server_message = conn.recv(1048)
-            print(server_message)
-        except Exception as e:
-            print(e)
-
-
-servers = [('localhost', 9000), ('localhost', 9001), ('localhost', 9002)]
-servers.remove((IP_address, port))
-
-while True:
-
-    """Accepts a connection request and stores two parameters,
-    conn which is a socket object for that user, and addr
-    which contains the IP address of the client that just
-    connected"""
-    conn, addr = server.accept()
-    if conn.getpeername() in servers:
-        servers.remove(conn.getpeername())
-        start_new_thread(serverthread, (conn))
-    else:
-        """Maintains a list of clients for ease of broadcasting
-        a message to all available people in the chatroom"""
-        list_of_clients.append(conn)
-
-        # prints the address of the user that just connected
-        print(addr[0] + " connected")
-
-        # creates and individual thread for every user
-        # that connects
-        start_new_thread(clientthread, (conn, addr))
-
-    for connserv in servers:
-        if connserv != (IP_address, port):
-            try:
-                server.connect((connserv[0], connserv[1]))
-                start_new_thread(serverthread, (server))
-            except Exception as e:
-                continue
-
-
-conn.close()
-server.close()
