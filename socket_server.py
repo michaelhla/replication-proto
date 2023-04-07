@@ -40,36 +40,81 @@ list_of_clients = []
 # client username dictionary, with login status: 0 if logged off, corresponding address if logged in
 client_dictionary = {}
 
+# caches for db operations
+msgcache = {}
+usercache = {}
 
-# lock for dictionary
-dict_lock = Lock()
+# locks
+dict_lock = Lock()  # client dict
+msg_cache_lock = Lock()
+user_cache_lock = Lock()
 
 # message queues per username
 message_queue = {}
 
 # DB OPERATIONS
 
-# USERFILEPATH = ""
-# MSGFILEPATH = ""
+USERFILEPATH = ""
+MSGFILEPATH = ""
 
-# try:
-#     with open(USERFILEPATH, mode='r') as csv_file:
-#         csv_reader = csv.DictReader(csv_file)
-#         client_dictionary = {}
-#         for row in csv_reader:
-#             key = row['key_column_name']
-#             client_dictionary[key] = row
-# except FileNotFoundError:
-#     print("user db not found")
 
-# try:
-#     with open(MSGFILEPATH, mode='r') as csv_file:
-#         writer = csv.writer(csv_file)
-#         row = [sender,receiver,message]
-#         # Write the new row to the CSV file
-#         writer.writerow(message)
-# except FileNotFoundError:
-#     print("message db not found")
+def load_db_to_state(path):
+    try:
+        with open(path, mode='r') as csv_file:
+            csv_reader = csv.DictReader(csv_file)
+            client_dictionary = {}
+            for row in csv_reader:
+                key = row['key_column_name']
+                client_dictionary[key] = row
+    except FileNotFoundError:
+        print("user db not found")
+    return client_dictionary
+
+
+def dump_cache(path, cache):
+    try:
+        with open(path, 'a', newline='') as file:
+            # Define the fieldnames for the CSV
+            fieldnames = cache.keys()
+
+            # Create the DictWriter object
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+
+            # Write the header row if the file is empty
+            if file.tell() == 0:
+                writer.writeheader()
+
+            # Iterate over the dictionary of dictionaries
+            for key1, inner_dict in cache.items():
+                for row in inner_dict.values():
+                    # Add the key1 to the row dictionary
+                    row['key1'] = key1
+
+                    # Write the row to the CSV file
+                    writer.writerow(row)
+            cache = {}
+    except FileNotFoundError:
+        print("db not found")
+
+
+def add_to_cache(item, cache, lock):
+    lock.acquire(timeout=10)
+    cache.add(item)
+    lock.release()
+
+# def client_api(op, id, user):
+#     try:
+#         with open(USERFILEPATH, mode='r') as csv_file:
+#             writer = csv.writer(csv_file)
+#             if op == "add":
+#                 row = [id, sender,receiver,message]
+#                 # Write the new row to the CSV file
+#                 writer.writerow(row)
+#             if op == "del":
+#                 writer.removerow(row)
+
+#     except FileNotFoundError:
+#         print("message db not found")
 
 
 def clientthread(conn, addr):
