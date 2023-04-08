@@ -36,7 +36,8 @@ list_of_replicas = []
 
 
 # replica dictionary, keyed by address and valued at machine id
-replica_dictionary = {"1" : (ADDR_1, PORT_1), "2" : (ADDR_2, PORT_2), "3" : (ADDR_3, PORT_3)}
+replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
+    ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
 
 # message queues per username
 message_queue = {}
@@ -60,6 +61,7 @@ user_cache_lock = Lock()
 
 USERFILEPATH = ""
 MSGFILEPATH = ""
+MSGQPATH = ""
 
 
 def load_db_to_state(path):
@@ -483,6 +485,19 @@ while True:
         conn, addr = server.accept()
         print(addr[0] + " connected")
         if conn in backups:
+            msgfile = open(MSGFILEPATH, "rb")
+            userfile = open(USERFILEPATH, 'rb')
+            qfile = open(MSGQPATH)
+            try:
+                # Send the file over the connection
+                conn.sendfile(msgfile)
+                conn.sendfile(userfile)
+                conn.sendfile(qfile)
+                msgfile.close()
+                userfile.close()
+                qfile.close()
+            except:
+                print('file error')
 
             # is a reconnecting replica:
             # redefine primary
