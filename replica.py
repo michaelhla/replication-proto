@@ -475,7 +475,8 @@ while True:
         # running client thread on primary server
         conn, addr = server.accept()
         print(addr[0] + " connected")
-        if conn:
+        if conn in backups:
+
             # is a reconnecting replica:
             # redefine primary
         else:
