@@ -7,6 +7,7 @@ import re
 import threading
 import csv
 import os
+import json
 
 NUM_MACHINES = 3
 ADDR_1 = ""
@@ -73,15 +74,18 @@ MSGQPATH = "msg_queue.json"
 msg_db = {}
 
 with open(USERFILEPATH, 'w') as f:
-    f.write(client_dictionary)
+    json_data = json.dumps(client_dictionary)
+    f.write(json_data)
     f.close()
 
 with open(MSGQPATH, 'w') as f:
-    f.write(message_queue)
+    json_data = json.dumps(message_queue)
+    f.write(json_data)
     f.close()
 
 with open(MSGFILEPATH, 'w') as f:
-    f.write(msg_db)
+    json_data = json.dumps(msg_db)
+    f.write(json_data)
     f.close()
 
 
