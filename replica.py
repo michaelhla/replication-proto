@@ -65,9 +65,25 @@ user_cache_lock = Lock()
 # DB OPERATIONS
 
 
-USERFILEPATH = ""
-MSGFILEPATH = ""
-MSGQPATH = ""
+
+USERFILEPATH = "user.json"
+MSGFILEPATH = "sent.json"
+MSGQPATH = "msg_queue.json"
+
+msg_db = {}
+
+with open(USERFILEPATH, 'w') as f:
+    f.write(client_dictionary)
+    f.close()
+
+with open(MSGQPATH, 'w') as f:
+    f.write(message_queue)
+    f.close()
+
+with open(MSGFILEPATH, 'w') as f:
+    f.write(msg_db)
+    f.close()
+
 
 
 def load_db_to_state(path):
