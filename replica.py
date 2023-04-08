@@ -13,7 +13,7 @@ ADDR_2 = ""
 ADDR_3 = ""
 
 # IP address is first argument
-IP_address = str(sys.argv[1])
+IP = str(sys.argv[1])
 
 
 # Port number is second argument
@@ -49,40 +49,6 @@ dict_lock = Lock()  # client dict
 msg_cache_lock = Lock()
 user_cache_lock = Lock()
 
-
-def serverthread(IP, port):
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((IP, port))
-    server.listen()
-
-    # catch up on logs, and determine primary by connections
-
-    while True:
-        # backup server loop
-        while is_Primary == False:
-            try:
-                msg = prim_conn.recv(2048)
-                if msg:
-                    # handle message
-                    pass
-                else:
-                    # server broken, red
-                    pass
-            except Exception as e:
-                print(e)
-                continue
-
-        while is_Primary == True:
-            # running client thread on primary server
-            conn, addr = server.accept()
-            print(addr[0] + " connected")
-            if conn  # is a reconnecting replica:
-            # redefine primary
-            else:
-                list_of_clients.append(conn)
-                # creates an individual thread for each machine that connects
-                start_new_thread(clientthread, (conn, addr))
 
 # DB OPERATIONS
 
@@ -450,3 +416,72 @@ def match(query):
         message = 'Regex Error'
 
     return message
+
+
+# catch up on logs, and determine primary by connections
+# init process:
+prim_conn = None
+backups = [('ip1', 0), ('ip2', 1), ('ip3', 2)]  # change to actual IP
+
+
+# hard coded initialization
+# this does not account for rejoining
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind((IP, port))
+server.listen()
+
+client_dictionary = load_db_to_state(USERFILEPATH)
+
+if backups[0][0] == IP and backups[0][1] == port:
+    is_Primary = True
+else:
+    try:
+        res = server.connect(backups[0][0], backups[0][1])
+        prim_conn = res
+    except:
+        print('init error')
+
+backups.pop(0)
+
+# need to clarify the process of rejoining
+
+while True:
+    # backup server loop
+    while is_Primary == False:
+        try:
+            msg = prim_conn.recv(2048)
+            if msg:
+                message_queue.add(msg)
+                prim_conn.send(1)
+                sent = prim_conn.recv(2048)
+                if sent == 1:
+                    msgcache.add(msg)
+                    if len(msgcache) >= 10:
+                        dump_cache(MSGFILEPATH, msgcache)
+            else:
+                # server broken, find next leader
+                if backups[0][0] == IP and backups[0][1] == port:
+                    backups.pop(0)
+                    is_Primary = True
+                    prim_conn = None
+
+        except Exception as e:
+            print(e)
+            continue
+
+    while is_Primary == True:
+        # running client thread on primary server
+        conn, addr = server.accept()
+        print(addr[0] + " connected")
+        if conn:
+            # is a reconnecting replica:
+            # redefine primary
+        else:
+            list_of_clients.append(conn)
+            # creates an individual thread for each machine that connects
+            start_new_thread(clientthread, (conn, addr))
+
+
+# does the primary need multiple threads to hear the confirmation from each thread separately?
