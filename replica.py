@@ -6,6 +6,7 @@ from threading import Lock
 import re
 import threading
 import csv
+import os
 
 NUM_MACHINES = 3
 ADDR_1 = ""
@@ -67,6 +68,7 @@ user_cache_lock = Lock()
 
 USERFILEPATH = ""
 MSGFILEPATH = ""
+MSGQPATH = ""
 
 
 def load_db_to_state(path):
@@ -435,6 +437,8 @@ def match(query):
 # init process:
 prim_conn = None
 # backups = [('ip1', 0), ('ip2', 1), ('ip3', 2)]  # change to actual IP
+files_to_expect = [USERFILEPATH, MSGFILEPATH, MSGQPATH]
+local_to_load = [client_dictionary, None, message_queue]
 
 
 # hard coded initialization
@@ -483,6 +487,26 @@ for idx in replica_dictionary.keys():
 # if no primary exists
 if primary_exists == False:
     is_Primary = True
+else:
+    try:
+        res = server.connect(backups[0][0], backups[0][1])
+        for i in range(len(files_to_expect)):
+            id = server.recv(4)
+            id = int.from_bytes(file_size, byteorder='big')
+            file_size = server.recv(8)
+            file_size = int.from_bytes(file_size, byteorder='big')
+            byteswritten = 0
+            with open(f'{files_to_expect[id]}', 'wb') as f:
+                # receive the file contents
+                while byteswritten < file_size:
+                    data = server.recv(1024)
+                    f.write(data)
+                    byteswritten += len(data)
+            if local_to_load is not None and byteswritten != 0:
+                load_db_to_state(files_to_expect[i])
+        prim_conn = res
+    except Exception as e:
+        print('init error', e)
 
 # thread that tells other incoming connections that it is a backup replica
 def backup_connections():
@@ -497,12 +521,23 @@ def backup_connections():
 def backup_message_handling():
     while is_Primary == False:
         try:
+            # FIX THIS for message queue
             msg = prim_conn.recv(2048)
             if msg:
-                handle_message(msg)
+                message_queue.add(msg)
+                # prim_conn.send(1)
+                sent = prim_conn.recv(2048)
+                if sent == 1:
+                    msgcache.add(message_queue.pop())
+                if len(msgcache) >= 10:
+                    dump_cache(MSGFILEPATH, msgcache)
             else:
-                # handle reelection
-
+                # server broken, find next leader
+                dump_cache(MSGFILEPATH, msgcache)
+                if backups[0][0] == IP and backups[0][1] == port:
+                    backups.pop(0)
+                    is_Primary = True
+                    prim_conn = None
 
         except Exception as e:
             print(e)
@@ -563,7 +598,20 @@ while True:
             conn.sendall(msg_file_contents)
 
             # TO DO: message queue
-            
+            for i in range(len(files_to_expect)):
+                file = files_to_expect[i]
+                sendafile = open(file, "rb")
+                filesize = os.path.getsize(file)
+                id = (i).to_bytes(4, "big")
+                size = (filesize).to_bytes(8, "big")
+                conn.sendall(id)
+                conn.sendall(size)
+                try:
+                    # Send the file over the connection
+                    conn.sendfile(sendafile)
+                    sendafile.close()
+                except:
+                    print('file error')            
         else:
             list_of_clients.append(conn)
             # creates an individual thread for each machine that connects
