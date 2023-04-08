@@ -533,13 +533,14 @@ def backup_message_handling():
             # FIX THIS for message queue
             msg = prim_conn.recv(2048)
             if msg:
-                message_queue.add(msg)
-                # prim_conn.send(1)
-                sent = prim_conn.recv(2048)
-                if sent == 1:
-                    msgcache.add(message_queue.pop())
-                if len(msgcache) >= 10:
-                    dump_cache(MSGFILEPATH, msgcache)
+                handle_message(msg)
+                # message_queue.add(msg)
+                # # prim_conn.send(1)
+                # sent = prim_conn.recv(2048)
+                # if sent == 1:
+                #     msgcache.add(message_queue.pop())
+                # if len(msgcache) >= 10:
+                #     dump_cache(MSGFILEPATH, msgcache)
             else:
                 # server broken, find next leader ?????
                 dump_cache(MSGFILEPATH, msgcache)
