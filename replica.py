@@ -441,8 +441,6 @@ files_to_expect = [USERFILEPATH, MSGFILEPATH, MSGQPATH]
 local_to_load = [client_dictionary, None, message_queue]
 
 
-# hard coded initialization
-# this does not account for rejoining
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -464,6 +462,9 @@ for idx in replica_dictionary.keys():
             conn_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             conn_socket.connect((replica_dictionary[idx]))
 
+            # store connection in replica_connections
+            replica_connections[idx] = conn_socket
+
             # received tag from other replicas, 0 implies backup, 1 implies primary
             tag = conn_socket.recv(2048)
             if tag == 1:
@@ -471,7 +472,6 @@ for idx in replica_dictionary.keys():
                 prim_conn = conn_socket
 
                 try:
-
                     for i in range(len(files_to_expect)):
                         id = server.recv(4)
                         id = int.from_bytes(file_size, byteorder='big')
@@ -490,34 +490,20 @@ for idx in replica_dictionary.keys():
                     print('init error', e)
 
 
-                # catching up on logs
-                # cli_dict_file = conn_socket.recv(2048)
-                # To Do: fix this for large files
-                # sent_msgs = conn_socket.recv(2048)
-                # To Do: store these to persistent and local state
-                # To Do: msg queue too 
             if tag == 0:
-                # reached out to backup, so nothing to change here
+                # reached out to backup, so nothing to change here, other than replica connection
                 pass
+                
         except ConnectionRefusedError:
             pass
         except Exception as e:
             print(e)
 
-# if no primary exists
+# if no primary exists, default primary
 if primary_exists == False:
     is_Primary = True
 
 
-# else:
-#     try:
-#         # res = server.connect(backups[0][0], backups[0][1])
-        
-#         prim_conn = res
-#     except Exception as e:
-#         print('init error', e)
-
-# thread that tells other incoming connections that it is a backup replica
 def backup_connections():
     while is_Primary == False:
         conn, addr = server.accept()
@@ -534,20 +520,37 @@ def backup_message_handling():
             msg = prim_conn.recv(2048)
             if msg:
                 handle_message(msg)
-                # message_queue.add(msg)
-                # # prim_conn.send(1)
-                # sent = prim_conn.recv(2048)
-                # if sent == 1:
-                #     msgcache.add(message_queue.pop())
-                # if len(msgcache) >= 10:
-                #     dump_cache(MSGFILEPATH, msgcache)
             else:
-                # server broken, find next leader ?????
+                # make current cache persistent
                 dump_cache(MSGFILEPATH, msgcache)
-                if backups[0][0] == IP and backups[0][1] == port:
-                    backups.pop(0)
+
+                # handle leader election
+                if machine_idx == "1":
                     is_Primary = True
-                    prim_conn = None
+
+                if machine_idx == "2":
+                    try:
+                        replica_connections["1"].send(b'hb')
+                    except (ConnectionResetError, BrokenPipeError):
+                        is_Primary = True
+                    except Exception as e:
+                        print(e)
+
+                if machine_idx == "3":
+                    try:
+                        replica_connections["1"].send(b'hb')
+                    except (ConnectionResetError, BrokenPipeError):
+                        try:
+                            replica_connections["2"].send(b'hb')
+                        except (ConnectionResetError, BrokenPipeError):
+                            is_Primary = True
+                        except Exception as e:
+                            print(e)
+                    except Exception as e:
+                        print(e)
+
+                        
+ 
 
         except Exception as e:
             print(e)
