@@ -525,29 +525,18 @@ def backup_message_handling():
                 dump_cache(MSGFILEPATH, msgcache)
 
                 # handle leader election
-                if machine_idx == "1":
+                is_Lowest = True
+                for i in range(1, int(machine_idx)):
+                    try:
+                        replica_connections[str(i)].send(b'hb')
+                        is_Lowest = False
+                    except (ConnectionResetError, BrokenPipeError):
+                        pass
+                    except Exception as e:
+                        print(e)
+                if is_Lowest == True:
                     is_Primary = True
 
-                if machine_idx == "2":
-                    try:
-                        replica_connections["1"].send(b'hb')
-                    except (ConnectionResetError, BrokenPipeError):
-                        is_Primary = True
-                    except Exception as e:
-                        print(e)
-
-                if machine_idx == "3":
-                    try:
-                        replica_connections["1"].send(b'hb')
-                    except (ConnectionResetError, BrokenPipeError):
-                        try:
-                            replica_connections["2"].send(b'hb')
-                        except (ConnectionResetError, BrokenPipeError):
-                            is_Primary = True
-                        except Exception as e:
-                            print(e)
-                    except Exception as e:
-                        print(e)
 
                         
  
