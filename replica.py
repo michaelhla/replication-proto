@@ -24,6 +24,9 @@ IP = str(sys.argv[1])
 # Port number is second argument
 port = int(sys.argv[2])
 
+# Machine number
+machine_idx = str(sys.argv[3])
+
 # maintains a list of potential clients
 list_of_clients = []
 
@@ -37,6 +40,10 @@ list_of_replicas = []
 
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1" : (ADDR_1, PORT_1), "2" : (ADDR_2, PORT_2), "3" : (ADDR_3, PORT_3)}
+reverse_rep_dict = {(ADDR_1, PORT_1) : "1", (ADDR_2, PORT_2) : "2", (ADDR_3, PORT_3) : "3"}
+
+# replica connections, that are established, changed to the connection once connected
+replica_connections = {"1" : 0, "2" : 0, "3" : 0}
 
 # message queues per username
 message_queue = {}
@@ -149,10 +156,11 @@ def handle_message(message, tag=None):
         if recep_username not in client_dictionary.keys():
             pass
         else:
-            text_message = message[3+length_of_username +
+            queue_tag = message[3+length_of_username+length_of_recep]
+            text_message = message[4+length_of_username +
                                    length_of_recep:].decode()
             # Checks if recipient logged out
-            if client_dictionary[recep_username] == 0:
+            if queue_tag == 0:
                 message_queue[recep_username].append(
                     [username, text_message])
 
@@ -426,7 +434,7 @@ def match(query):
 # catch up on logs, and determine primary by connections
 # init process:
 prim_conn = None
-backups = [('ip1', 0), ('ip2', 1), ('ip3', 2)]  # change to actual IP
+# backups = [('ip1', 0), ('ip2', 1), ('ip3', 2)]  # change to actual IP
 
 
 # hard coded initialization
@@ -439,55 +447,154 @@ server.listen()
 
 client_dictionary = load_db_to_state(USERFILEPATH)
 
-if backups[0][0] == IP and backups[0][1] == port:
+
+
+
+
+# initialization
+# only while a server is_Primary=True can it accept connections 
+primary_exists = False
+for idx in replica_dictionary.keys():
+    if idx != machine_idx:
+        try:
+            conn_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            conn_socket.connect((replica_dictionary[idx]))
+
+            # received tag from other replicas, 0 implies backup, 1 implies primary
+            tag = conn_socket.recv(2048)
+            if tag == 1:
+                primary_exists = True
+                prim_conn = conn_socket
+
+                # catching up on logs
+                cli_dict_file = conn_socket.recv(2048)
+                # To Do: fix this for large files
+                sent_msgs = conn_socket.recv(2048)
+                # To Do: store these to persistent and local state
+                # To Do: msg queue too 
+            if tag == 0:
+                # reached out to backup, so nothing to change here
+                pass
+        except ConnectionRefusedError:
+            pass
+        except Exception as e:
+            print(e)
+
+# if no primary exists
+if primary_exists == False:
     is_Primary = True
-else:
-    try:
-        res = server.connect(backups[0][0], backups[0][1])
-        prim_conn = res
-    except:
-        print('init error')
 
-backups.pop(0)
+# thread that tells other incoming connections that it is a backup replica
+def backup_connections():
+    while is_Primary == False:
+        conn, addr = server.accept()
+        print(addr[0] + " connected")
+        if addr in replica_dictionary.values():
+            replica_connections[reverse_rep_dict[addr]] = conn
+            bmsg = (0).to_bytes(1, "big")
+            conn.sendall(bmsg)
 
-# need to clarify the process of rejoining
-
-while True:
-    # backup server loop
+def backup_message_handling():
     while is_Primary == False:
         try:
             msg = prim_conn.recv(2048)
             if msg:
-                message_queue.add(msg)
-                prim_conn.send(1)
-                sent = prim_conn.recv(2048)
-                if sent == 1:
-                    msgcache.add(msg)
-                    if len(msgcache) >= 10:
-                        dump_cache(MSGFILEPATH, msgcache)
+                handle_message(msg)
             else:
-                # server broken, find next leader
-                if backups[0][0] == IP and backups[0][1] == port:
-                    backups.pop(0)
-                    is_Primary = True
-                    prim_conn = None
+                # handle reelection
+
 
         except Exception as e:
             print(e)
             continue
 
+
+
+while True:
+    # backup server loop
+    start_new_thread(backup_connections, ())
+    start_new_thread(backup_message_handling, ())
+    # while is_Primary == False:
+    #     try:
+    #         msg = prim_conn.recv(2048)
+    #         if msg:
+    #             handle_message(msg)
+    #             # message_queue.add(msg)
+    #             # prim_conn.send(1)
+    #             # sent = prim_conn.recv(2048)
+    #             # if sent == 1:
+    #             #     msgcache.add(msg)
+    #                 # if len(msgcache) >= 10:
+    #                 #     dump_cache(MSGFILEPATH, msgcache)
+    #         else:
+    #             # server broken, find next leader
+
+
+
+
+               
+
+        # except Exception as e:
+        #     print(e)
+        #     continue
+
     while is_Primary == True:
         # running client thread on primary server
         conn, addr = server.accept()
         print(addr[0] + " connected")
-        if conn in backups:
+        # is a reconnecting replica:
+        if addr in replica_dictionary.values():
+            replica_connections[reverse_rep_dict[addr]] = conn
+            # sends tag that this connection is the primary
+            bmsg = (1).to_bytes(1, "big")
+            conn.sendall(bmsg)
 
-            # is a reconnecting replica:
-            # redefine primary
+            # sends logs of client dict, sent messages, and message queue
+            with open(USERFILEPATH, "rb") as f:
+                usr_file_contents = f.read()
+            tag = (1).to_bytes(1, "big")
+            usr_file_contents = tag + usr_file_contents
+            conn.sendall(usr_file_contents)
+            
+            with open(MSGFILEPATH, "rb") as f:
+                msg_file_contents = f.read()
+            tag = (2).to_bytes(1, "big")
+            msg_file_contents = tag + msg_file_contents
+            conn.sendall(msg_file_contents)
+
+            # TO DO: message queue
+            
         else:
             list_of_clients.append(conn)
             # creates an individual thread for each machine that connects
             start_new_thread(clientthread, (conn, addr))
 
 
+
+
+
+
+
 # does the primary need multiple threads to hear the confirmation from each thread separately?
+
+
+
+
+
+
+# if backups[0][0] == IP and backups[0][1] == port:
+#     is_Primary = True
+# else:
+#     try:
+#         res = server.connect(backups[0][0], backups[0][1])
+#         prim_conn = res
+#     except:
+#         print('init error')
+
+# backups.pop(0)
+
+# need to clarify the process of rejoining
+ # if backups[0][0] == IP and backups[0][1] == port:
+                #     backups.pop(0)
+                #     is_Primary = True
+                #     prim_conn = None
