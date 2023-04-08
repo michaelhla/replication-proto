@@ -35,16 +35,15 @@ list_of_clients = []
 client_dictionary = {}
 
 
-# maintains list of active replicas
-list_of_replicas = []
-
-
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1" : (ADDR_1, PORT_1), "2" : (ADDR_2, PORT_2), "3" : (ADDR_3, PORT_3)}
 reverse_rep_dict = {(ADDR_1, PORT_1) : "1", (ADDR_2, PORT_2) : "2", (ADDR_3, PORT_3) : "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1" : 0, "2" : 0, "3" : 0}
+
+replica_lock = Lock()  # lock on replica_connections
+
 
 # message queues per username
 message_queue = {}
@@ -150,8 +149,7 @@ def handle_message(message, tag=None):
         # sending messages
 
         length_of_recep = message[2+length_of_username]  # convert to int
-        recep_username = message[3+length_of_username:3 +
-                                 length_of_username+length_of_recep].decode()
+        recep_username = message[3+length_of_username:3+length_of_username+length_of_recep].decode()
 
         dict_lock.acquire(timeout=10)
         # Checks if recipeint is actually a possible recipient
@@ -178,13 +176,23 @@ def handle_message(message, tag=None):
         # TO DO: for message in message_queue, persistent store the successfully sent message
 
         # current active message_queue is empty in backup state
-        message_queue[username] = 0
+        message_queue[username] = []
         # TO DO: overwrite the persistent store state of the new current message_queue
         dict_lock.release()
 
     if tag == 6:
         # no state change for a lookup request
         pass
+
+def send_to_replicas(message):
+    for idx in replica_connections.keys():
+        if idx != machine_idx:
+            try:
+                replica_connections[idx].sendall(message)
+            except Exception as e:
+                print(e)
+                continue
+
 
 
 # To Do: send connections the messages as the client sends them in, with adjusted wire protocol
@@ -234,6 +242,14 @@ def clientthread(conn, addr):
                     else:
                         client_dictionary[username] = conn
                         message_queue[username] = []
+
+                        # send update to replicas
+                        update = (0).to_bytes(1, "big") + (len(username)).to_bytes(1, "big") + username.encode()
+                        replica_lock.acquire()
+                        send_to_replicas(update)
+                        replica_lock.release()
+
+                        # response to client
                         message = "Account created. Welcome " + username + "!"
                         return_tag = (1).to_bytes(1, "big")
                         bmsg = return_tag + message.encode()
@@ -311,12 +327,21 @@ def clientthread(conn, addr):
 
                     # Delete Account
                     if tag == 3:  # start of delete account
+
                         # Acquire dict lock, remove username from client dictionary and message_queue
                         dict_lock.acquire(timeout=10)
                         client_dictionary.pop(username)
                         message_queue.pop(username)
                         logged_in = False
                         dict_lock.release()
+
+                        # update replicas
+                        update = (3).to_bytes(1, "big") + (len(username)).to_bytes(1, "big") + username.encode()
+                        replica_lock.acquire()
+                        send_to_replicas(update)
+                        replica_lock.release()
+
+                        # update clients
                         message = "Account " + username + " successfully deleted. \n"
                         return_tag = (0).to_bytes(1, "big")
                         bmsg = return_tag + message.encode()
@@ -342,6 +367,15 @@ def clientthread(conn, addr):
                             if client_dictionary[recep_username] == 0:
                                 message_queue[recep_username].append(
                                     [username, text_message])
+                                
+                                # update replicas
+                                update = (4).to_bytes(1, "big") + (len(username)).to_bytes(1, "big") + username.encode() + message[1:2+length_of_recep] + (0).to_bytes(1, "big") + text_message.encode()
+                                replica_lock.acquire()
+                                send_to_replicas(update)
+                                replica_lock.release()
+
+
+
                                 confirmation_message = "\nMessage successfully sent."
                                 return_tag = (1).to_bytes(1, "big")
                                 bmsg = return_tag + confirmation_message.encode()
@@ -351,6 +385,16 @@ def clientthread(conn, addr):
                                 recep_conn = client_dictionary[recep_username]
                                 new_message = "<"+username+">: " + text_message
                                 try:
+
+                                    # To Do: persistent store this
+
+                                    # update replicas
+                                    update = (4).to_bytes(1, "big") + (len(username)).to_bytes(1, "big") + username.encode() + message[1:2+length_of_recep] + (1).to_bytes(1, "big") + text_message.encode()
+                                    replica_lock.acquire()
+                                    send_to_replicas(update)
+                                    replica_lock.release()
+
+
                                     return_tag = (1).to_bytes(1, "big")
                                     bmsg = return_tag + new_message.encode()
                                     recep_conn.sendall(bmsg)
@@ -372,11 +416,19 @@ def clientthread(conn, addr):
                         for undelivered in message_queue[username]:
                             sender = undelivered[0]
                             undel_message = undelivered[1]
-                            # To Do: username will have /n at the end
                             message = "<" + sender + ">: " + undel_message
                             return_tag = (1).to_bytes(1, "big")
                             bmsg = return_tag + message.encode()
                             conn.sendall(bmsg)
+
+                        # empties the message queue
+                        message_queue[username] = []
+
+                        # update replicas
+                        update = (5).to_bytes(1, "big") + (len(username)).to_bytes(1, "big") + username.encode()
+                        replica_lock.acquire()
+                        send_to_replicas(update)
+                        replica_lock.release()
 
                     if tag == 6:
                         query = message[1:].decode()
@@ -463,7 +515,9 @@ for idx in replica_dictionary.keys():
             conn_socket.connect((replica_dictionary[idx]))
 
             # store connection in replica_connections
+            replica_lock.acquire()
             replica_connections[idx] = conn_socket
+            replica_lock.release()
 
             # received tag from other replicas, 0 implies backup, 1 implies primary
             tag = conn_socket.recv(2048)
@@ -509,7 +563,9 @@ def backup_connections():
         conn, addr = server.accept()
         print(addr[0] + " connected")
         if addr in replica_dictionary.values():
+            replica_lock.acquire()
             replica_connections[reverse_rep_dict[addr]] = conn
+            replica_lock.release()
             bmsg = (0).to_bytes(1, "big")
             conn.sendall(bmsg)
 
@@ -525,10 +581,13 @@ def backup_message_handling():
                 dump_cache(MSGFILEPATH, msgcache)
 
                 # handle leader election
+                # if this doesnt work, use test sockets that are closed
                 is_Lowest = True
                 for i in range(1, int(machine_idx)):
                     try:
-                        replica_connections[str(i)].send(b'hb')
+                        replica_lock.acquire()
+                        replica_connections[str(i)].sendall(b'hb')
+                        replica_lock.release()
                         is_Lowest = False
                     except (ConnectionResetError, BrokenPipeError):
                         pass
@@ -536,10 +595,6 @@ def backup_message_handling():
                         print(e)
                 if is_Lowest == True:
                     is_Primary = True
-
-
-                        
- 
 
         except Exception as e:
             print(e)
@@ -581,7 +636,9 @@ while True:
         print(addr[0] + " connected")
         # is a reconnecting replica:
         if addr in replica_dictionary.values():
+            replica_lock.acquire()
             replica_connections[reverse_rep_dict[addr]] = conn
+            replica_lock.release()
             # sends tag that this connection is the primary
             bmsg = (1).to_bytes(1, "big")
             conn.sendall(bmsg)
