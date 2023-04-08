@@ -9,13 +9,13 @@ import json
 import os
 
 NUM_MACHINES = 3
-ADDR_1 = ""
-ADDR_2 = ""
-ADDR_3 = ""
+ADDR_1 = "localhost"
+ADDR_2 = "localhost"
+ADDR_3 = "localhost"
 
-PORT_1 = ""
-PORT_2 = ""
-PORT_3 = ""
+PORT_1 = "8080"
+PORT_2 = "8081"
+PORT_3 = "8082"
 
 
 # IP address is first argument
@@ -38,8 +38,7 @@ client_dictionary = {}
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
-                     : "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)                    : "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -117,13 +116,14 @@ def load_db_to_state(path):
 #         print("db not found")
 
 
-def write(flag, file):
-    if flag == 0:
-        dict = client_dictionary
-    elif flag == 1:
-        dict = msg_db
-    elif flag == 2:
-        dict = message_queue
+def write(flag):
+    dict = local_to_load[flag]
+    file = files_to_expect[flag]
+    try:
+        with open(file, 'w') as f:
+            json.dump(dict, f)
+    except:
+        print(f'ERROR: could not write to {file}')
 
 
 # for backup servers, updates server state as if it were interacting with the client, but without sending
@@ -142,22 +142,20 @@ def handle_message(message, tag=None):
             # backup stores username as logged off, as we will automatically log off clients when the server crashes
             client_dictionary[username] = 0
             message_queue[username] = []
+            write(0)
+            write(2)
         dict_lock.release()
 
-    if tag == 1:
-        # we pass here, because a login doesn't change necessary state of the backup server, as the client will have to log in if the primary fails
-        pass
-    if tag == 2:
-        # similar to above, logouts do not affect backup state
-        pass
     if tag == 3:
         # deletes the username from backup server state
         dict_lock.acquire(timeout=10)
         client_dictionary.pop(username)
         message_queue.pop(username)
         dict_lock.release()
+        write(0)
+
     if tag == 4:
-        # sending messages
+        # adding messages to queue
 
         length_of_recep = message[2+length_of_username]  # convert to int
         recep_username = message[3+length_of_username:3 +
@@ -178,8 +176,7 @@ def handle_message(message, tag=None):
 
             # If logged in, look up connection in dictionary
             else:
-                # TO DO: Persistent store the successfully sent message
-                pass
+                write(2, MSGQPATH)
         dict_lock.release()
 
     if tag == 5:
@@ -188,13 +185,12 @@ def handle_message(message, tag=None):
         # TO DO: for message in message_queue, persistent store the successfully sent message
 
         # current active message_queue is empty in backup state
+        msg_db[username].append(message_queue[username])
         message_queue[username] = 0
         # TO DO: overwrite the persistent store state of the new current message_queue
+        write(1)
+        write(2)
         dict_lock.release()
-
-    if tag == 6:
-        # no state change for a lookup request
-        pass
 
 
 def send_to_replicas(message):
@@ -649,13 +645,13 @@ def backup_connections():
 def backup_message_handling():
     while is_Primary == False:
         try:
-            # FIX THIS for message queue
             msg = prim_conn.recv(2048)
             if msg:
                 handle_message(msg)
             else:
                 # make current cache persistent
-                dump_cache(MSGFILEPATH, msgcache)
+                for i in range(len(files_to_expect)):
+                    write(i, files_to_expect[i])
 
                 # handle leader election
                 # if this doesnt work, use test sockets that are closed
