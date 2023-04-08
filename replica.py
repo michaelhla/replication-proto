@@ -65,9 +65,9 @@ user_cache_lock = Lock()
 # DB OPERATIONS
 
 
-USERFILEPATH = "user.json"
-MSGFILEPATH = "sent.json"
-MSGQPATH = "msg_queue.json"
+USERFILEPATH = "user" + machine_idx + ".json"
+MSGFILEPATH = "sent" + machine_idx +  ".json"
+MSGQPATH = "msg_queue"  + machine_idx + ".json"
 
 msg_db = {}
 
