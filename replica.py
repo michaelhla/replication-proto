@@ -6,6 +6,7 @@ from threading import Lock
 import re
 import threading
 import csv
+import os
 
 NUM_MACHINES = 3
 ADDR_1 = ""
@@ -429,6 +430,8 @@ def match(query):
 # init process:
 prim_conn = None
 backups = [('ip1', 0), ('ip2', 1), ('ip3', 2)]  # change to actual IP
+files_to_expect = [USERFILEPATH, MSGFILEPATH, MSGQPATH]
+local_to_load = [client_dictionary, None, message_queue]
 
 
 # hard coded initialization
@@ -446,10 +449,23 @@ if backups[0][0] == IP and backups[0][1] == port:
 else:
     try:
         res = server.connect(backups[0][0], backups[0][1])
-        # receive db files from leader here
+        for i in range(len(files_to_expect)):
+            id = server.recv(4)
+            id = int.from_bytes(file_size, byteorder='big')
+            file_size = server.recv(8)
+            file_size = int.from_bytes(file_size, byteorder='big')
+            byteswritten = 0
+            with open(f'{files_to_expect[id]}', 'wb') as f:
+                # receive the file contents
+                while byteswritten < file_size:
+                    data = server.recv(1024)
+                    f.write(data)
+                    byteswritten += len(data)
+            if local_to_load is not None and byteswritten != 0:
+                load_db_to_state(files_to_expect[i])
         prim_conn = res
-    except:
-        print('init error')
+    except Exception as e:
+        print('init error', e)
 
 backups.pop(0)
 
@@ -459,6 +475,7 @@ while True:
     # backup server loop
     while is_Primary == False:
         try:
+            # FIX THIS for message queue
             msg = prim_conn.recv(2048)
             if msg:
                 message_queue.add(msg)
@@ -485,20 +502,20 @@ while True:
         conn, addr = server.accept()
         print(addr[0] + " connected")
         if conn in backups:
-            msgfile = open(MSGFILEPATH, "rb")
-            userfile = open(USERFILEPATH, 'rb')
-            qfile = open(MSGQPATH)
-            try:
-                # Send the file over the connection
-                conn.sendfile(msgfile)
-                conn.sendfile(userfile)
-                conn.sendfile(qfile)
-                msgfile.close()
-                userfile.close()
-                qfile.close()
-            except:
-                print('file error')
-
+            for i in range(len(files_to_expect)):
+                file = files_to_expect[i]
+                sendafile = open(file, "rb")
+                filesize = os.path.getsize(file)
+                id = (i).to_bytes(4, "big")
+                size = (filesize).to_bytes(8, "big")
+                conn.sendall(id)
+                conn.sendall(size)
+                try:
+                    # Send the file over the connection
+                    conn.sendfile(sendafile)
+                    sendafile.close()
+                except:
+                    print('file error')
             # is a reconnecting replica:
             # redefine primary
         else:
