@@ -470,10 +470,30 @@ for idx in replica_dictionary.keys():
                 primary_exists = True
                 prim_conn = conn_socket
 
+                try:
+
+                    for i in range(len(files_to_expect)):
+                        id = server.recv(4)
+                        id = int.from_bytes(file_size, byteorder='big')
+                        file_size = server.recv(8)
+                        file_size = int.from_bytes(file_size, byteorder='big')
+                        byteswritten = 0
+                        with open(f'{files_to_expect[id]}', 'wb') as f:
+                            # receive the file contents
+                            while byteswritten < file_size:
+                                data = server.recv(1024)
+                                f.write(data)
+                                byteswritten += len(data)
+                        if local_to_load is not None and byteswritten != 0:
+                            load_db_to_state(files_to_expect[i])
+                except Exception as e:
+                    print('init error', e)
+
+
                 # catching up on logs
-                cli_dict_file = conn_socket.recv(2048)
+                # cli_dict_file = conn_socket.recv(2048)
                 # To Do: fix this for large files
-                sent_msgs = conn_socket.recv(2048)
+                # sent_msgs = conn_socket.recv(2048)
                 # To Do: store these to persistent and local state
                 # To Do: msg queue too 
             if tag == 0:
@@ -487,26 +507,15 @@ for idx in replica_dictionary.keys():
 # if no primary exists
 if primary_exists == False:
     is_Primary = True
-else:
-    try:
-        res = server.connect(backups[0][0], backups[0][1])
-        for i in range(len(files_to_expect)):
-            id = server.recv(4)
-            id = int.from_bytes(file_size, byteorder='big')
-            file_size = server.recv(8)
-            file_size = int.from_bytes(file_size, byteorder='big')
-            byteswritten = 0
-            with open(f'{files_to_expect[id]}', 'wb') as f:
-                # receive the file contents
-                while byteswritten < file_size:
-                    data = server.recv(1024)
-                    f.write(data)
-                    byteswritten += len(data)
-            if local_to_load is not None and byteswritten != 0:
-                load_db_to_state(files_to_expect[i])
-        prim_conn = res
-    except Exception as e:
-        print('init error', e)
+
+
+# else:
+#     try:
+#         # res = server.connect(backups[0][0], backups[0][1])
+        
+#         prim_conn = res
+#     except Exception as e:
+#         print('init error', e)
 
 # thread that tells other incoming connections that it is a backup replica
 def backup_connections():
@@ -532,7 +541,7 @@ def backup_message_handling():
                 if len(msgcache) >= 10:
                     dump_cache(MSGFILEPATH, msgcache)
             else:
-                # server broken, find next leader
+                # server broken, find next leader ?????
                 dump_cache(MSGFILEPATH, msgcache)
                 if backups[0][0] == IP and backups[0][1] == port:
                     backups.pop(0)
@@ -585,19 +594,18 @@ while True:
             conn.sendall(bmsg)
 
             # sends logs of client dict, sent messages, and message queue
-            with open(USERFILEPATH, "rb") as f:
-                usr_file_contents = f.read()
-            tag = (1).to_bytes(1, "big")
-            usr_file_contents = tag + usr_file_contents
-            conn.sendall(usr_file_contents)
+            # with open(USERFILEPATH, "rb") as f:
+            #     usr_file_contents = f.read()
+            # tag = (1).to_bytes(1, "big")
+            # usr_file_contents = tag + usr_file_contents
+            # conn.sendall(usr_file_contents)
             
-            with open(MSGFILEPATH, "rb") as f:
-                msg_file_contents = f.read()
-            tag = (2).to_bytes(1, "big")
-            msg_file_contents = tag + msg_file_contents
-            conn.sendall(msg_file_contents)
+            # with open(MSGFILEPATH, "rb") as f:
+            #     msg_file_contents = f.read()
+            # tag = (2).to_bytes(1, "big")
+            # msg_file_contents = tag + msg_file_contents
+            # conn.sendall(msg_file_contents)
 
-            # TO DO: message queue
             for i in range(len(files_to_expect)):
                 file = files_to_expect[i]
                 sendafile = open(file, "rb")
