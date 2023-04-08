@@ -11,10 +11,8 @@ server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 if len(sys.argv) != 3:
     print("Correct usage: script, IP address, port number")
     exit()
-servers = [('localhost', 9000), ('localhost', 9001), ('localhost', 9002)]
-index = random.randint(0, 2)
-IP_address = servers[index][0]
-Port = servers[index][1]
+IP_address = str(sys.argv[1])
+Port = int(sys.argv[2])
 server.connect((IP_address, Port))
 
 

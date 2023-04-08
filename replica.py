@@ -1,10 +1,9 @@
 import socket
-import select
+import traceback
 import sys
 from _thread import *
 from threading import Lock
 import re
-import threading
 import json
 import os
 import json
@@ -14,9 +13,9 @@ ADDR_1 = "localhost"
 ADDR_2 = "localhost"
 ADDR_3 = "localhost"
 
-PORT_1 = "8080"
-PORT_2 = "8081"
-PORT_3 = "8082"
+PORT_1 = 8080
+PORT_2 = 8081
+PORT_3 = 8082
 
 
 # IP address is first argument
@@ -39,7 +38,8 @@ client_dictionary = {}
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)                    : "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
+                     : "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -65,8 +65,8 @@ user_cache_lock = Lock()
 
 
 USERFILEPATH = "user" + machine_idx + ".json"
-MSGFILEPATH = "sent" + machine_idx +  ".json"
-MSGQPATH = "msg_queue"  + machine_idx + ".json"
+MSGFILEPATH = "sent" + machine_idx + ".json"
+MSGQPATH = "msg_queue" + machine_idx + ".json"
 
 msg_db = {}
 
@@ -199,7 +199,7 @@ def handle_message(message, tag=None):
 
 def send_to_replicas(message):
     for idx in replica_connections.keys():
-        if idx != machine_idx:
+        if idx != machine_idx and replica_connections[idx] != 0:
             try:
                 replica_connections[idx].sendall(message)
             except Exception as e:
@@ -557,7 +557,8 @@ for idx in replica_dictionary.keys():
         except ConnectionRefusedError:
             pass
         except Exception as e:
-            print(e)
+            traceback.print_exc()
+            print('hello')
 
 # if no primary exists, default primary
 if primary_exists == False:
@@ -675,6 +676,7 @@ def backup_message_handling():
 
         except Exception as e:
             print(e)
+            print('backup massage')
             continue
 
 
