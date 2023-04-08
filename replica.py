@@ -439,6 +439,7 @@ if backups[0][0] == IP and backups[0][1] == port:
 else:
     try:
         res = server.connect(backups[0][0], backups[0][1])
+        # receive db files from leader here
         prim_conn = res
     except:
         print('init error')
@@ -454,14 +455,15 @@ while True:
             msg = prim_conn.recv(2048)
             if msg:
                 message_queue.add(msg)
-                prim_conn.send(1)
+                # prim_conn.send(1)
                 sent = prim_conn.recv(2048)
                 if sent == 1:
-                    msgcache.add(msg)
-                    if len(msgcache) >= 10:
-                        dump_cache(MSGFILEPATH, msgcache)
+                    msgcache.add(message_queue.pop())
+                if len(msgcache) >= 10:
+                    dump_cache(MSGFILEPATH, msgcache)
             else:
                 # server broken, find next leader
+                dump_cache(MSGFILEPATH, msgcache)
                 if backups[0][0] == IP and backups[0][1] == port:
                     backups.pop(0)
                     is_Primary = True
