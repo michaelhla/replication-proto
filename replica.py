@@ -12,6 +12,11 @@ ADDR_1 = ""
 ADDR_2 = ""
 ADDR_3 = ""
 
+PORT_1 = ""
+PORT_2 = ""
+PORT_3 = ""
+
+
 # IP address is first argument
 IP = str(sys.argv[1])
 
@@ -31,7 +36,7 @@ list_of_replicas = []
 
 
 # replica dictionary, keyed by address and valued at machine id
-replica_dictionary = {ADDR_1: 1, ADDR_2: 2, ADDR_3: 3}
+replica_dictionary = {"1" : (ADDR_1, PORT_1), "2" : (ADDR_2, PORT_2), "3" : (ADDR_3, PORT_3)}
 
 # message queues per username
 message_queue = {}
