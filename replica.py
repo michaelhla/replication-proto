@@ -19,16 +19,33 @@ PORT_1 = 9080
 PORT_2 = 9081
 PORT_3 = 9082
 
+CPORT_1 = 8080
+CPORT_2 = 8081
+CPORT_3 = 8082
 
-# IP address is first argument
-IP = str(sys.argv[1])
 
+ADDRS = [ADDR_1, ADDR_2, ADDR_3]
+PORTS = [PORT_1, PORT_2, PORT_3]
+CPORTS = [CPORT_1, CPORT_2, CPORT_3]
 
-# Port number is second argument
-port = int(sys.argv[2])
+#sudo kill -9 $(sudo lsof -t -i :8080)
+
 
 # Machine number
-machine_idx = str(sys.argv[3])
+machine_idx = str(sys.argv[1])
+
+
+# IP address 
+IP = ADDRS[int(machine_idx)-1]
+
+
+# Server Port number
+s_port = PORTS[int(machine_idx)-1]
+
+# Client Port number
+c_port = CPORTS[int(machine_idx)-1]
+
+
 
 # maintains a list of potential clients
 list_of_clients = []
@@ -597,7 +614,7 @@ def backup_connections():
         conn_type = conn.recv(1)
         index_of_connector = conn_type[0]
         print(index_of_connector)
-        key = str(int.from_bytes(index_of_connector, "big"))
+        key = str(index_of_connector)
         # is a reconnecting replica:
         if key in replica_dictionary.keys():
             replica_lock.acquire()
@@ -612,15 +629,14 @@ def backup_message_handling():
     global is_Primary
     while is_Primary == False:
         try:
-            print(prim_conn)
-            print('why')
+            print('prim_conn')
             msg = prim_conn.recv(2048)
             if msg:
                 handle_message(msg)
-            else:
-                # make current cache persistent
-                for i in range(len(files_to_expect)):
-                    write(i)
+
+        except ConnectionResetError: 
+            for i in range(len(files_to_expect)):
+                write(i)
 
                 # handle leader election
                 # if this doesnt work, use test sockets that are closed
@@ -655,7 +671,7 @@ local_to_load = [user_state_dictionary, msg_db, message_queue]
 
 backupserver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 backupserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-backupserver.bind((IP, port+999+int(machine_idx)))
+backupserver.bind((IP, s_port))
 backupserver.listen()
 
 inputs = [backupserver]
@@ -717,18 +733,20 @@ for idx in replica_dictionary.keys():
             traceback.print_exc()
             print('hello')
 
+
 # if no primary exists, default primary
 if primary_exists == False:
     is_Primary = True
     # may need to only initialize this if we are the primary
     clientserver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     clientserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    clientserver.bind((IP, port))
+    clientserver.bind((IP, c_port))
     clientserver.listen()
     inputs.append(clientserver)
     for i in range(len(local_to_load)):
         local_to_load[i] = load_db_to_state(
             files_to_expect[i])  # persistence for the primary
+        
 
 # not sure where this should go
 start_new_thread(backup_connections, ())
