@@ -1,3 +1,4 @@
+import time
 import socket
 import traceback
 import sys
@@ -7,15 +8,16 @@ import re
 import json
 import os
 import json
+import select
 
 NUM_MACHINES = 3
-ADDR_1 = "10.250.11.249"
-ADDR_2 = "10.250.11.249"
-ADDR_3 = "10.250.11.249"
+ADDR_1 = "127.0.0.1"
+ADDR_2 = "127.0.0.1"
+ADDR_3 = "127.0.0.1"
 
-PORT_1 = 8080
-PORT_2 = 8081
-PORT_3 = 8082
+PORT_1 = 9080
+PORT_2 = 9081
+PORT_3 = 9082
 
 
 # IP address is first argument
@@ -33,13 +35,13 @@ list_of_clients = []
 
 # client username dictionary, with login status: 0 if logged off, corresponding address if logged in
 client_dictionary = {}
+user_state_dictionary = {}
 
 
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
-                     : "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2): "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -52,7 +54,7 @@ message_queue = {}
 msg_db = {}
 
 # defined global variable of whether replica is primary or backup
-global is_Primary
+# global is_Primary
 is_Primary = False
 
 # locks
@@ -71,7 +73,7 @@ MSGQPATH = "msg_queue" + machine_idx + ".json"
 msg_db = {}
 
 with open(USERFILEPATH, 'w') as f:
-    json_data = json.dumps(client_dictionary)
+    json_data = json.dumps(user_state_dictionary)
     f.write(json_data)
     f.close()
 
@@ -121,9 +123,15 @@ def load_db_to_state(path):
 
 
 def write(flag):
-    dict = local_to_load[flag]
+    if flag == 0:
+        dict = user_state_dictionary
+    elif flag == 1:
+        dict = msg_db
+    elif flag == 2:
+        dict = message_queue
     file = files_to_expect[flag]
     try:
+        print(dict, file)
         with open(file, 'w') as f:
             json.dump(dict, f)
     except:
@@ -145,6 +153,7 @@ def handle_message(message, tag=None):
         else:
             # backup stores username as logged off, as we will automatically log off clients when the server crashes
             client_dictionary[username] = 0
+            user_state_dictionary[username] = 0
             message_queue[username] = []
             write(0)
             write(2)
@@ -154,9 +163,10 @@ def handle_message(message, tag=None):
         # deletes the username from backup server state
         dict_lock.acquire(timeout=10)
         client_dictionary.pop(username)
+        user_state_dictionary.pop(username)
         message_queue.pop(username)
-        dict_lock.release()
         write(0)
+        dict_lock.release()
 
     if tag == 4:
         # adding messages to queue
@@ -253,13 +263,16 @@ def clientthread(conn, addr):
                         conn.sendall(bmsg)
                     else:
                         client_dictionary[username] = conn
+                        user_state_dictionary[username] = 1
                         message_queue[username] = []
 
                         # send update to replicas
                         update = (0).to_bytes(1, "big") + (len(username)
                                                            ).to_bytes(1, "big") + username.encode()
                         replica_lock.acquire()
+                        print(client_dictionary)
                         send_to_replicas(update)
+                        write(0)
                         replica_lock.release()
 
                         # response to client
@@ -293,6 +306,7 @@ def clientthread(conn, addr):
                             conn.sendall(bmsg)
                         else:
                             client_dictionary[username] = conn
+                            user_state_dictionary[username] = conn
                             message = "Welcome back " + username + "!"
                             return_tag = (1).to_bytes(1, "big")
                             bmsg = return_tag + message.encode()
@@ -344,6 +358,7 @@ def clientthread(conn, addr):
                         # Acquire dict lock, remove username from client dictionary and message_queue
                         dict_lock.acquire(timeout=10)
                         client_dictionary.pop(username)
+                        user_state_dictionary.pop(username)
                         message_queue.pop(username)
                         logged_in = False
                         dict_lock.release()
@@ -353,6 +368,7 @@ def clientthread(conn, addr):
                                                            ).to_bytes(1, "big") + username.encode()
                         replica_lock.acquire()
                         send_to_replicas(update)
+                        write(0)
                         replica_lock.release()
 
                         # update clients
@@ -387,6 +403,7 @@ def clientthread(conn, addr):
                                 ) + message[1:2+length_of_recep] + (0).to_bytes(1, "big") + text_message.encode()
                                 replica_lock.acquire()
                                 send_to_replicas(update)
+                                write(2)
                                 replica_lock.release()
 
                                 confirmation_message = "\nMessage successfully sent."
@@ -406,6 +423,8 @@ def clientthread(conn, addr):
                                     ) + message[1:2+length_of_recep] + (1).to_bytes(1, "big") + text_message.encode()
                                     replica_lock.acquire()
                                     send_to_replicas(update)
+                                    write(2)
+                                    write(1)
                                     replica_lock.release()
 
                                     return_tag = (1).to_bytes(1, "big")
@@ -474,6 +493,7 @@ def clientthread(conn, addr):
 def logout(username):
     dict_lock.acquire(timeout=10)
     client_dictionary[username] = 0
+    user_state_dictionary[username] = 0
     dict_lock.release()
 
 
@@ -499,76 +519,6 @@ def match(query):
     return message
 
 
-# catch up on logs, and determine primary by connections
-# init process:
-prim_conn = None
-# backups = [('ip1', 0), ('ip2', 1), ('ip3', 2)]  # change to actual IP
-files_to_expect = [USERFILEPATH, MSGFILEPATH, MSGQPATH]
-local_to_load = [client_dictionary, None, message_queue]
-
-
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server.bind((IP, port))
-server.listen()
-
-
-# initialization
-# only while a server is_Primary=True can it accept connections
-primary_exists = False
-for idx in replica_dictionary.keys():
-    if idx != machine_idx:
-        try:
-            conn_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            conn_socket.connect((replica_dictionary[idx]))
-
-            # store connection in replica_connections
-            replica_lock.acquire()
-            replica_connections[idx] = conn_socket
-            replica_lock.release()
-
-            # received tag from other replicas, 0 implies backup, 1 implies primary
-            tag = conn_socket.recv(2048)
-            print(tag)
-            if tag == 1:
-                primary_exists = True
-                prim_conn = conn_socket
-                try:
-                    for i in range(len(files_to_expect)):
-                        id = server.recv(4)
-                        id = int.from_bytes(file_size, byteorder='big')
-                        file_size = server.recv(8)
-                        file_size = int.from_bytes(file_size, byteorder='big')
-                        byteswritten = 0
-                        with open(f'{files_to_expect[id]}', 'wb') as f:
-                            # receive the file contents
-                            while byteswritten < file_size:
-                                data = server.recv(1024)
-                                f.write(data)
-                                byteswritten += len(data)
-                        if local_to_load is not None and byteswritten != 0:
-                            load_db_to_state(files_to_expect[i])
-                except Exception as e:
-                    print('init error', e)
-
-            if tag == 0:
-                # reached out to backup, so nothing to change here, other than replica connection
-                pass
-
-        except ConnectionRefusedError:
-            pass
-        except Exception as e:
-            traceback.print_exc()
-            print('hello')
-
-# if no primary exists, default primary
-if primary_exists == False:
-    is_Primary = True
-    for i in range(len(local_to_load)):
-        local_to_load[i] = load_db_to_state(
-            files_to_expect[i])  # persistence for the primary
-
-
 # for backup servers, updates server state as if it were interacting with the client, but without sending
 def handle_message(message, tag=None):
     tag = message[0]
@@ -584,6 +534,7 @@ def handle_message(message, tag=None):
         else:
             # backup stores username as logged off, as we will automatically log off clients when the server crashes
             client_dictionary[username] = 0
+            user_state_dictionary[username] = 0
             message_queue[username] = []
             # update backups
             write(0, USERFILEPATH)
@@ -595,6 +546,7 @@ def handle_message(message, tag=None):
         # deletes the username from backup server state
         dict_lock.acquire(timeout=10)
         client_dictionary.pop(username)
+        user_state_dictionary.pop(username)
         message_queue.pop(username)
         dict_lock.release()
         # persist deletion of user
@@ -637,9 +589,9 @@ def handle_message(message, tag=None):
 
 # thread that tells other incoming connections that it is a backup replica
 def backup_connections():
+    global is_Primary
     while is_Primary == False:
-        conn, addr = server.accept()
-        key = (addr[0], conn.getsockname()[1])
+        conn, addr = backupserver.accept()
         print(addr[0] + " connected")
         # is a reconnecting replica:
         if key in replica_dictionary.values() and key != (IP, port):
@@ -651,18 +603,22 @@ def backup_connections():
 
 
 def backup_message_handling():
+    global is_Primary
     while is_Primary == False:
         try:
+            print(prim_conn)
+            print('why')
             msg = prim_conn.recv(2048)
             if msg:
                 handle_message(msg)
             else:
                 # make current cache persistent
                 for i in range(len(files_to_expect)):
-                    write(i, files_to_expect[i])
+                    write(i)
 
                 # handle leader election
                 # if this doesnt work, use test sockets that are closed
+                # THIS DOES NOT WORK, REPLICA_CONNECTIONS IS NOT BEING UPDATED
                 is_Lowest = True
                 for i in range(1, int(machine_idx)):
                     try:
@@ -678,16 +634,102 @@ def backup_message_handling():
                     is_Primary = True
 
         except Exception as e:
-            print(e)
+            traceback.print_exc()
             print('backup massage')
             continue
 
 
+# catch up on logs, and determine primary by connections
+# init process:
+prim_conn = None
+# backups = [('ip1', 0), ('ip2', 1), ('ip3', 2)]  # change to actual IP
+files_to_expect = [USERFILEPATH, MSGFILEPATH, MSGQPATH]
+local_to_load = [user_state_dictionary, msg_db, message_queue]
 
-   # backup server loop
+
+backupserver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+backupserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+backupserver.bind((IP, port+999+int(machine_idx)))
+backupserver.listen()
+
+inputs = [backupserver]
+
+
+# initialization
+# only while a server is_Primary=True can it accept connections
+primary_exists = False
+for idx in replica_dictionary.keys():
+    # print(replica_dictionary, idx)
+    if idx != machine_idx:
+        try:
+            conn_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # print(replica_dictionary[idx])
+            conn_socket.connect(replica_dictionary[idx])
+
+            # store connection in replica_connections
+            replica_lock.acquire()
+            # ONLY GETS HERE ONCE FOR SECOND SERVER
+            replica_connections[idx] = conn_socket
+            replica_lock.release()
+
+            # received tag from other replicas, 0 implies backup, 1 implies primary
+            tag = conn_socket.recv(1)
+            print(tag)
+            if tag[0] == 1:
+                primary_exists = True
+                prim_conn = conn_socket
+                try:
+                    for i in range(len(files_to_expect)):
+                        id = conn_socket.recv(4)
+                        id = int.from_bytes(id, byteorder='big')
+                        file_size = conn_socket.recv(8)
+                        file_size = int.from_bytes(file_size, byteorder='big')
+                        byteswritten = 0
+                        with open(f'{files_to_expect[id]}', 'wb') as f:
+                            # receive the file contents
+                            while byteswritten < file_size:
+                                buf = min(file_size - byteswritten, 1024)
+                                data = conn_socket.recv(buf)
+                                print(data)
+                                f.write(data)
+                                byteswritten += len(data)
+                        if local_to_load is not None and byteswritten != 0:
+                            load_db_to_state(files_to_expect[i])
+                except Exception as e:
+                    print('init error', e)
+                    traceback.print_exc()
+
+            if tag == 0:
+                # reached out to backup, so nothing to change here, other than replica connection
+                pass
+
+        except ConnectionRefusedError:
+            pass
+        except Exception as e:
+            traceback.print_exc()
+            print('hello')
+
+# if no primary exists, default primary
+if primary_exists == False:
+    is_Primary = True
+    # may need to only initialize this if we are the primary
+    clientserver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    clientserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    clientserver.bind((IP, port))
+    clientserver.listen()
+    inputs.append(clientserver)
+    for i in range(len(local_to_load)):
+        local_to_load[i] = load_db_to_state(
+            files_to_expect[i])  # persistence for the primary
+
+# not sure where this should go
+start_new_thread(backup_connections, ())
 if not is_Primary:
-    start_new_thread(backup_connections, ())
     start_new_thread(backup_message_handling, ())
+
+connlist = []
+while True:
+    # backup server loop
     # while is_Primary == False:
     #     try:
     #         msg = prim_conn.recv(2048)
@@ -703,68 +745,51 @@ if not is_Primary:
     #         else:
     #             # server broken, find next leader
 
-        # except Exception as e:
-        #     print(e)
-        #     continue
+    # except Exception as e:
+    #     print(e)
+    #     continue
 
+    while is_Primary == True:
+        readable, _, _ = select.select(inputs, [], [])
+        # running client thread on primary server
+        for sock in readable:
+            if sock == backupserver:
+                print('backing')
+                conn, addr = backupserver.accept()
+                print(addr[0] + " connected")
+                key = (addr[0], conn.getsockname()[1])
+                # is a reconnecting replica:
+                if key in replica_dictionary.values() and key != (IP, port):
+                    replica_lock.acquire()
+                    replica_connections[reverse_rep_dict[key]] = conn
+                    replica_lock.release()
+                    # sends tag that this connection is the primary
+                    bmsg = (1).to_bytes(1, "big")
+                    conn.sendall(bmsg)
 
-
-
-while is_Primary == True:
-    # running client thread on primary server
-    conn, addr = server.accept()
-    key = (addr[0], conn.getsockname()[1])
-    print(addr[0] + " connected")
-    print(conn)
-    print(replica_dictionary.values())
-    # is a reconnecting replica:
-    if key in replica_dictionary.values() and key != (IP, port):
-        print("FOUNDIT")
-        replica_lock.acquire()
-        replica_connections[reverse_rep_dict[addr]] = conn
-        replica_lock.release()
-        # sends tag that this connection is the primary
-        bmsg = (1).to_bytes(1, "big")
-        conn.sendall(bmsg)
-
-        # sends logs of client dict, sent messages, and message queue
-        for i in range(len(files_to_expect)):
-            file = files_to_expect[i]
-            sendafile = open(file, "rb")
-            filesize = os.path.getsize(file)
-            id = (i).to_bytes(4, "big")
-            size = (filesize).to_bytes(8, "big")
-            conn.sendall(id)
-            conn.sendall(size)
-            try:
-                # Send the file over the connection
-                conn.sendfile(sendafile)
-                sendafile.close()
-            except:
-                print('file error')
-    else:
-        print("BAD")
-        list_of_clients.append(conn)
-        # creates an individual thread for each machine that connects
-        start_new_thread(clientthread, (conn, addr))
+                    # sends logs of client dict, sent messages, and message queue
+                    for i in range(len(files_to_expect)):
+                        file = files_to_expect[i]
+                        filesize = os.path.getsize(file)
+                        id = (i).to_bytes(4, "big")
+                        size = (filesize).to_bytes(8, "big")
+                        conn.sendall(id)
+                        conn.sendall(size)
+                        try:
+                            with open(file, 'rb') as sendafile:
+                                # Send the file over the connection
+                                bytesread = sendafile.read(1024)
+                                if not bytesread:
+                                    break
+                                conn.sendall(bytesread)
+                        except:
+                            print('file error')
+            elif sock == clientserver:
+                print('success')
+                conn, addr = clientserver.accept()
+                list_of_clients.append(conn)
+                # creates an individual thread for each machine that connects
+                start_new_thread(clientthread, (conn, addr))
 
 
 # does the primary need multiple threads to hear the confirmation from each thread separately?
-
-
-# if backups[0][0] == IP and backups[0][1] == port:
-#     is_Primary = True
-# else:
-#     try:
-#         res = server.connect(backups[0][0], backups[0][1])
-#         prim_conn = res
-#     except:
-#         print('init error')
-
-# backups.pop(0)
-
-# need to clarify the process of rejoining
- # if backups[0][0] == IP and backups[0][1] == port:
-            #     backups.pop(0)
-            #     is_Primary = True
-            #     prim_conn = None
