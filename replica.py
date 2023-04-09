@@ -11,9 +11,10 @@ import json
 import select
 
 NUM_MACHINES = 3
-ADDR_1 = "127.0.0.1"
-ADDR_2 = "127.0.0.1"
-ADDR_3 = "127.0.0.1"
+ADDR_1 = "10.250.11.249"
+ADDR_2 = "10.250.11.249"
+ADDR_3 = "10.250.11.249"
+
 PORT_1 = 9080
 PORT_2 = 9081
 PORT_3 = 9082
@@ -57,8 +58,7 @@ user_state_dictionary = {}
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
-                     : "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2): "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -222,6 +222,8 @@ def handle_message(message, tag=None):
         write(1)
         write(2)
         dict_lock.release()
+
+
 
 
 def send_to_replicas(message):
@@ -551,11 +553,11 @@ def handle_message(message, tag=None):
         else:
             # backup stores username as logged off, as we will automatically log off clients when the server crashes
             client_dictionary[username] = 0
-            user_state_dictionary[username] = 1
+            user_state_dictionary[username] = 0
             message_queue[username] = []
             # update backups
-            write(0)
-            write(2)
+            write(0, USERFILEPATH)
+            write(2, MSGQPATH)
 
         dict_lock.release()
 
@@ -567,7 +569,7 @@ def handle_message(message, tag=None):
         message_queue.pop(username)
         dict_lock.release()
         # persist deletion of user
-        write(0)
+        write(0, USERFILEPATH)
     if tag == 4:
         # adding messages that have not been sent to the queue
 
@@ -590,7 +592,7 @@ def handle_message(message, tag=None):
 
             # If logged in, look up connection in dictionary
             else:
-                write(2)
+                write(2, MSGQPATH)
         dict_lock.release()
 
     if tag == 5:
@@ -600,7 +602,7 @@ def handle_message(message, tag=None):
 
         # current active message_queue is empty in backup state
         message_queue[username] = 0
-        write(2)
+        write(2, MSGQPATH)
         dict_lock.release()
 
 
@@ -612,11 +614,12 @@ def backup_connections():
         conn_type = conn.recv(1)
         index_of_connector = conn_type[0]
         print(index_of_connector)
+        print("backup reception")
         key = str(index_of_connector)
         # is a reconnecting replica:
         if key in replica_dictionary.keys():
             replica_lock.acquire()
-            # THIS DOES NOT DISTINGUISH
+            #THIS DOES NOT DISTINGUISH
             replica_connections[key] = conn
             replica_lock.release()
             bmsg = (0).to_bytes(1, "big")
@@ -625,42 +628,56 @@ def backup_connections():
 
 def backup_message_handling():
     global is_Primary
-    while is_Primary == False:
-        try:
-            print('prim_conn')
-            msg = prim_conn.recv(2048)
-            if msg:
-                handle_message(msg)
-
-        except ConnectionResetError: 
+    global prim_conn
+    while is_Primary == False:        
+        msg = prim_conn.recv(2048)
+        if msg:
+            handle_message(msg)
+        else:
             for i in range(len(files_to_expect)):
                 write(i)
 
                 # handle leader election
                 # if this doesnt work, use test sockets that are closed
                 # THIS DOES NOT WORK, REPLICA_CONNECTIONS IS NOT BEING UPDATED
-                is_Lowest = True
-                for i in range(1, int(machine_idx)):
+            is_Lowest = True
+            for i in range(1, int(machine_idx)):
+                if str(i) != machine_idx:
                     try:
-                        replica_lock.acquire()
-                        replica_connections[str(i)].sendall(b'hb')
-                        replica_lock.release()
-                        is_Lowest = False
-                    except (ConnectionResetError, BrokenPipeError):
-                        pass
-                    except Exception as e:
-                        print(e)
-                if is_Lowest == True:
-                    is_Primary = True
+                        test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        test_socket.connect((ADDRS[i-1], PORTS[i-1]))
+                        test_socket.settimeout(int(machine_idx))
+                        test_socket.sendall(int(machine_idx).to_bytes(1, "big"))
+                        
+                        ret_tag = test_socket.recv(1)
+                        print("-----")
+                        print(i)
+                        print("ASDF")
+                        print(ret_tag)
+                        print("------")
+                        
 
-        except Exception as e:
-            traceback.print_exc()
-            print('backup massage')
-            continue
+                    except (ConnectionResetError, BrokenPipeError):
+                        print("A")
+                        continue
+                    except Exception as e:
+                        print("B")
+                        print(e)
+                        replica_lock.acquire()
+                        replica_connections[str(i)].close()
+                        replica_connections[str(i)] = 0
+                        replica_lock.release()
+                        continue
+            if is_Lowest == True:
+                is_Primary = True
+            print("election done")
+            print(is_Primary)
+        
 
 
 # catch up on logs, and determine primary by connections
 # init process:
+global prim_conn
 prim_conn = None
 # backups = [('ip1', 0), ('ip2', 1), ('ip3', 2)]  # change to actual IP
 files_to_expect = [USERFILEPATH, MSGFILEPATH, MSGQPATH]
@@ -696,7 +713,6 @@ for idx in replica_dictionary.keys():
 
             # received tag from other replicas, 0 implies backup, 1 implies primary
             tag = conn_socket.recv(1)
-            print(tag)
             if tag[0] == 1:
                 primary_exists = True
                 prim_conn = conn_socket
@@ -720,7 +736,7 @@ for idx in replica_dictionary.keys():
                     print('init error', e)
                     traceback.print_exc()
 
-            elif tag[0] == 0:
+            if tag == 0:
                 # reached out to backup, so nothing to change here, other than replica connection
                 pass
 
@@ -746,12 +762,15 @@ if primary_exists == False:
         
 
 # not sure where this should go
+print("line 750")
 start_new_thread(backup_connections, ())
 if not is_Primary:
     start_new_thread(backup_message_handling, ())
 
 connlist = []
 while True:
+    if is_Primary == True:
+        print("Ho")
     # backup server loop
     # while is_Primary == False:
     #     try:
@@ -782,6 +801,7 @@ while True:
                 conn_type = conn.recv(1)
                 index_of_connector = conn_type[0]
                 print(index_of_connector)
+                print("primary reception")
                 key = str(index_of_connector)
                 # print(addr[0] + " connected")
                 # key = (addr[0], conn.getsockname()[1])
@@ -791,7 +811,6 @@ while True:
                     replica_connections[key] = conn
                     replica_lock.release()
                     # sends tag that this connection is the primary
-                    print("ASDF")
                     bmsg = (1).to_bytes(1, "big")
                     conn.sendall(bmsg)
 
