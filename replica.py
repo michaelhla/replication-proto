@@ -9,9 +9,9 @@ import os
 import json
 
 NUM_MACHINES = 3
-ADDR_1 = "localhost"
-ADDR_2 = "localhost"
-ADDR_3 = "localhost"
+ADDR_1 = "10.250.11.249"
+ADDR_2 = "10.250.11.249"
+ADDR_3 = "10.250.11.249"
 
 PORT_1 = 8080
 PORT_2 = 8081
@@ -529,6 +529,7 @@ for idx in replica_dictionary.keys():
 
             # received tag from other replicas, 0 implies backup, 1 implies primary
             tag = conn_socket.recv(2048)
+            print(tag)
             if tag == 1:
                 primary_exists = True
                 prim_conn = conn_socket
@@ -638,8 +639,10 @@ def handle_message(message, tag=None):
 def backup_connections():
     while is_Primary == False:
         conn, addr = server.accept()
+        key = (addr[0], conn.getsockname()[1])
         print(addr[0] + " connected")
-        if addr in replica_dictionary.values():
+        # is a reconnecting replica:
+        if key in replica_dictionary.values() and key != (IP, port):
             replica_lock.acquire()
             replica_connections[reverse_rep_dict[addr]] = conn
             replica_lock.release()
@@ -680,11 +683,11 @@ def backup_message_handling():
             continue
 
 
-while True:
-    # backup server loop
+
+   # backup server loop
+if not is_Primary:
     start_new_thread(backup_connections, ())
-    if not is_Primary:
-        start_new_thread(backup_message_handling, ())
+    start_new_thread(backup_message_handling, ())
     # while is_Primary == False:
     #     try:
     #         msg = prim_conn.recv(2048)
@@ -704,38 +707,46 @@ while True:
         #     print(e)
         #     continue
 
-    while is_Primary == True:
-        # running client thread on primary server
-        conn, addr = server.accept()
-        print(addr[0] + " connected")
-        # is a reconnecting replica:
-        if addr in replica_dictionary.values():
-            replica_lock.acquire()
-            replica_connections[reverse_rep_dict[addr]] = conn
-            replica_lock.release()
-            # sends tag that this connection is the primary
-            bmsg = (1).to_bytes(1, "big")
-            conn.sendall(bmsg)
 
-            # sends logs of client dict, sent messages, and message queue
-            for i in range(len(files_to_expect)):
-                file = files_to_expect[i]
-                sendafile = open(file, "rb")
-                filesize = os.path.getsize(file)
-                id = (i).to_bytes(4, "big")
-                size = (filesize).to_bytes(8, "big")
-                conn.sendall(id)
-                conn.sendall(size)
-                try:
-                    # Send the file over the connection
-                    conn.sendfile(sendafile)
-                    sendafile.close()
-                except:
-                    print('file error')
-        else:
-            list_of_clients.append(conn)
-            # creates an individual thread for each machine that connects
-            start_new_thread(clientthread, (conn, addr))
+
+
+while is_Primary == True:
+    # running client thread on primary server
+    conn, addr = server.accept()
+    key = (addr[0], conn.getsockname()[1])
+    print(addr[0] + " connected")
+    print(conn)
+    print(replica_dictionary.values())
+    # is a reconnecting replica:
+    if key in replica_dictionary.values() and key != (IP, port):
+        print("FOUNDIT")
+        replica_lock.acquire()
+        replica_connections[reverse_rep_dict[addr]] = conn
+        replica_lock.release()
+        # sends tag that this connection is the primary
+        bmsg = (1).to_bytes(1, "big")
+        conn.sendall(bmsg)
+
+        # sends logs of client dict, sent messages, and message queue
+        for i in range(len(files_to_expect)):
+            file = files_to_expect[i]
+            sendafile = open(file, "rb")
+            filesize = os.path.getsize(file)
+            id = (i).to_bytes(4, "big")
+            size = (filesize).to_bytes(8, "big")
+            conn.sendall(id)
+            conn.sendall(size)
+            try:
+                # Send the file over the connection
+                conn.sendfile(sendafile)
+                sendafile.close()
+            except:
+                print('file error')
+    else:
+        print("BAD")
+        list_of_clients.append(conn)
+        # creates an individual thread for each machine that connects
+        start_new_thread(clientthread, (conn, addr))
 
 
 # does the primary need multiple threads to hear the confirmation from each thread separately?
