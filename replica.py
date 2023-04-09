@@ -605,8 +605,6 @@ def backup_message_handling():
     global is_Primary
     while is_Primary == False:
         try:
-            print(prim_conn)
-            print('why')
             msg = prim_conn.recv(2048)
             if msg:
                 handle_message(msg)
@@ -689,7 +687,6 @@ for idx in replica_dictionary.keys():
                             while byteswritten < file_size:
                                 buf = min(file_size - byteswritten, 1024)
                                 data = conn_socket.recv(buf)
-                                print(data)
                                 f.write(data)
                                 byteswritten += len(data)
                         if local_to_load is not None and byteswritten != 0:
@@ -757,10 +754,12 @@ while True:
                 conn, addr = backupserver.accept()
                 print(addr[0] + " connected")
                 key = (addr[0], conn.getsockname()[1])
+                print(key)
                 # is a reconnecting replica:
                 if key in replica_dictionary.values() and key != (IP, port):
                     replica_lock.acquire()
                     replica_connections[reverse_rep_dict[key]] = conn
+                    print(replica_connections)
                     replica_lock.release()
                     # sends tag that this connection is the primary
                     bmsg = (1).to_bytes(1, "big")
