@@ -207,6 +207,8 @@ def handle_message(message, tag=None):
         dict_lock.release()
 
 
+
+
 def send_to_replicas(message):
     for idx in replica_connections.keys():
         if idx != machine_idx and replica_connections[idx] != 0:
@@ -596,6 +598,7 @@ def backup_connections():
         # is a reconnecting replica:
         if key in replica_dictionary.values() and key != (IP, port):
             replica_lock.acquire()
+            #THIS DOES NOT DISTINGUISH
             replica_connections[reverse_rep_dict[addr]] = conn
             replica_lock.release()
             bmsg = (0).to_bytes(1, "big")
