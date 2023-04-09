@@ -11,10 +11,9 @@ import json
 import select
 
 NUM_MACHINES = 3
-ADDR_1 = "10.250.11.249"
-ADDR_2 = "10.250.11.249"
-ADDR_3 = "10.250.11.249"
-
+ADDR_1 = "127.0.0.1"
+ADDR_2 = "127.0.0.1"
+ADDR_3 = "127.0.0.1"
 PORT_1 = 9080
 PORT_2 = 9081
 PORT_3 = 9082
@@ -535,11 +534,11 @@ def handle_message(message, tag=None):
         else:
             # backup stores username as logged off, as we will automatically log off clients when the server crashes
             client_dictionary[username] = 0
-            user_state_dictionary[username] = 0
+            user_state_dictionary[username] = 1
             message_queue[username] = []
             # update backups
-            write(0, USERFILEPATH)
-            write(2, MSGQPATH)
+            write(0)
+            write(2)
 
         dict_lock.release()
 
@@ -551,7 +550,7 @@ def handle_message(message, tag=None):
         message_queue.pop(username)
         dict_lock.release()
         # persist deletion of user
-        write(0, USERFILEPATH)
+        write(0)
     if tag == 4:
         # adding messages that have not been sent to the queue
 
@@ -574,7 +573,7 @@ def handle_message(message, tag=None):
 
             # If logged in, look up connection in dictionary
             else:
-                write(2, MSGQPATH)
+                write(2)
         dict_lock.release()
 
     if tag == 5:
@@ -584,7 +583,7 @@ def handle_message(message, tag=None):
 
         # current active message_queue is empty in backup state
         message_queue[username] = 0
-        write(2, MSGQPATH)
+        write(2)
         dict_lock.release()
 
 
@@ -703,7 +702,7 @@ for idx in replica_dictionary.keys():
                     print('init error', e)
                     traceback.print_exc()
 
-            if tag == 0:
+            elif tag[0] == 0:
                 # reached out to backup, so nothing to change here, other than replica connection
                 pass
 
