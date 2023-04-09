@@ -11,10 +11,9 @@ import json
 import select
 
 NUM_MACHINES = 3
-ADDR_1 = "10.250.11.249"
-ADDR_2 = "10.250.11.249"
-ADDR_3 = "10.250.11.249"
-
+ADDR_1 = "127.0.0.1"
+ADDR_2 = "127.0.0.1"
+ADDR_3 = "127.0.0.1"
 PORT_1 = 9080
 PORT_2 = 9081
 PORT_3 = 9082
@@ -58,7 +57,8 @@ user_state_dictionary = {}
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2): "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
+                     : "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -222,8 +222,6 @@ def handle_message(message, tag=None):
         write(1)
         write(2)
         dict_lock.release()
-
-
 
 
 def send_to_replicas(message):
@@ -553,11 +551,11 @@ def handle_message(message, tag=None):
         else:
             # backup stores username as logged off, as we will automatically log off clients when the server crashes
             client_dictionary[username] = 0
-            user_state_dictionary[username] = 0
+            user_state_dictionary[username] = 1
             message_queue[username] = []
             # update backups
-            write(0, USERFILEPATH)
-            write(2, MSGQPATH)
+            write(0)
+            write(2)
 
         dict_lock.release()
 
@@ -569,7 +567,7 @@ def handle_message(message, tag=None):
         message_queue.pop(username)
         dict_lock.release()
         # persist deletion of user
-        write(0, USERFILEPATH)
+        write(0)
     if tag == 4:
         # adding messages that have not been sent to the queue
 
@@ -592,7 +590,7 @@ def handle_message(message, tag=None):
 
             # If logged in, look up connection in dictionary
             else:
-                write(2, MSGQPATH)
+                write(2)
         dict_lock.release()
 
     if tag == 5:
@@ -602,7 +600,7 @@ def handle_message(message, tag=None):
 
         # current active message_queue is empty in backup state
         message_queue[username] = 0
-        write(2, MSGQPATH)
+        write(2)
         dict_lock.release()
 
 
@@ -618,7 +616,7 @@ def backup_connections():
         # is a reconnecting replica:
         if key in replica_dictionary.keys():
             replica_lock.acquire()
-            #THIS DOES NOT DISTINGUISH
+            # THIS DOES NOT DISTINGUISH
             replica_connections[key] = conn
             replica_lock.release()
             bmsg = (0).to_bytes(1, "big")
@@ -714,7 +712,6 @@ for idx in replica_dictionary.keys():
                             while byteswritten < file_size:
                                 buf = min(file_size - byteswritten, 1024)
                                 data = conn_socket.recv(buf)
-                                print(data)
                                 f.write(data)
                                 byteswritten += len(data)
                         if local_to_load is not None and byteswritten != 0:
@@ -723,7 +720,7 @@ for idx in replica_dictionary.keys():
                     print('init error', e)
                     traceback.print_exc()
 
-            if tag == 0:
+            elif tag[0] == 0:
                 # reached out to backup, so nothing to change here, other than replica connection
                 pass
 
