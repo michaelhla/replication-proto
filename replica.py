@@ -11,9 +11,9 @@ import json
 import select
 
 NUM_MACHINES = 3
-ADDR_1 = "127.0.0.1"
-ADDR_2 = "127.0.0.1"
-ADDR_3 = "127.0.0.1"
+ADDR_1 = "10.250.11.249"
+ADDR_2 = "10.250.11.249"
+ADDR_3 = "10.250.11.249"
 
 PORT_1 = 9080
 PORT_2 = 9081
@@ -41,7 +41,8 @@ user_state_dictionary = {}
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2): "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
+                     : "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -592,10 +593,15 @@ def backup_connections():
     global is_Primary
     while is_Primary == False:
         conn, addr = backupserver.accept()
-        print(addr[0] + " connected")
-        if addr in replica_dictionary.values():
+        conn_type = conn.recv(1)
+        index_of_connector = conn_type[0]
+        print(index_of_connector)
+        key = str(int.from_bytes(index_of_connector, "big"))
+        # is a reconnecting replica:
+        if key in replica_dictionary.keys():
             replica_lock.acquire()
-            replica_connections[reverse_rep_dict[addr]] = conn
+            # THIS DOES NOT DISTINGUISH
+            replica_connections[key] = conn
             replica_lock.release()
             bmsg = (0).to_bytes(1, "big")
             conn.sendall(bmsg)
@@ -662,6 +668,8 @@ for idx in replica_dictionary.keys():
             conn_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             # print(replica_dictionary[idx])
             conn_socket.connect(replica_dictionary[idx])
+            mtag = int(machine_idx).to_bytes(1, "big")
+            conn_socket.sendall(mtag)
 
             # store connection in replica_connections
             replica_lock.acquire()
@@ -752,16 +760,19 @@ while True:
             if sock == backupserver:
                 print('backing')
                 conn, addr = backupserver.accept()
-                print(addr[0] + " connected")
-                key = (addr[0], conn.getsockname()[1])
-                print(key)
+                conn_type = conn.recv(1)
+                index_of_connector = conn_type[0]
+                print(index_of_connector)
+                key = str(index_of_connector)
+                # print(addr[0] + " connected")
+                # key = (addr[0], conn.getsockname()[1])
                 # is a reconnecting replica:
-                if key in replica_dictionary.values() and key != (IP, port):
+                if key in replica_dictionary.keys():
                     replica_lock.acquire()
-                    replica_connections[reverse_rep_dict[key]] = conn
-                    print(replica_connections)
+                    replica_connections[key] = conn
                     replica_lock.release()
                     # sends tag that this connection is the primary
+                    print("ASDF")
                     bmsg = (1).to_bytes(1, "big")
                     conn.sendall(bmsg)
 
