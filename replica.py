@@ -58,7 +58,8 @@ user_state_dictionary = {}
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2): "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
+                     : "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -89,20 +90,23 @@ MSGQPATH = "msg_queue" + machine_idx + ".json"
 
 msg_db = {}
 
-with open(USERFILEPATH, 'w') as f:
-    json_data = json.dumps(user_state_dictionary)
-    f.write(json_data)
-    f.close()
+# if os.path.getsize(USERFILEPATH) == 0:
+#     with open(USERFILEPATH, 'w') as f:
+#         json_data = json.dumps(user_state_dictionary)
+#         f.write(json_data)
+#         f.close()
 
-with open(MSGQPATH, 'w') as f:
-    json_data = json.dumps(message_queue)
-    f.write(json_data)
-    f.close()
+# if os.path.getsize(MSGQPATH) == 0:
+#     with open(MSGQPATH, 'w') as f:
+#         json_data = json.dumps(message_queue)
+#         f.write(json_data)
+#         f.close()
 
-with open(MSGFILEPATH, 'w') as f:
-    json_data = json.dumps(msg_db)
-    f.write(json_data)
-    f.close()
+# if os.path.getsize(MSGFILEPATH) == 0:
+#     with open(MSGFILEPATH, 'w') as f:
+#         json_data = json.dumps(msg_db)
+#         f.write(json_data)
+#         f.close()
 
 
 def load_db_to_state(path):
@@ -163,6 +167,7 @@ def handle_message(message, tag=None):
         if username in message_queue.keys():
             message_queue.pop(username)
         write(0)
+        write(2)
         dict_lock.release()
 
     if tag == 4:
@@ -227,7 +232,7 @@ def clientthread(conn, addr):
 
         # maintain a state variable as logged in or logged off
         # while logged off, logged_in = False
-        print("here again")
+        print("back to login")
         # sends a message to the client whose user object is conn
         message = "Welcome to Messenger! Please login or create an account:"
         return_tag = (0).to_bytes(1, "big")
@@ -539,8 +544,8 @@ def backup_message_handling():
             is_Lowest = True
             for i in range(1, int(machine_idx)):
                 try:
-                    # sleep is janky, need to ensure that 2 becomes primary before 3 connects to 2
-                    time.sleep((int(machine_idx)-2)*2)
+                    # ensures ordering of leader election, replacement for conn.active()
+                    time.sleep((int(machine_idx)-2)*0.2)
                     test_socket = socket.socket(
                         socket.AF_INET, socket.SOCK_STREAM)
                     test_socket.connect((ADDRS[i-1], PORTS[i-1]))
@@ -675,6 +680,8 @@ inputs.append(clientserver)
 for i in range(len(local_to_load)):
     if i == 0:
         user_state_dictionary = load_db_to_state(
+            files_to_expect[i])
+        client_dictionary = load_db_to_state(
             files_to_expect[i])  # persistence for the primary
     elif i == 1:
         msg_db = load_db_to_state(
