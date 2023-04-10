@@ -12,9 +12,11 @@ import select
 import threading
 
 NUM_MACHINES = 3
+
 ADDR_1 = "127.0.0.1"
 ADDR_2 = "127.0.0.1"
 ADDR_3 = "127.0.0.1"
+
 
 PORT_1 = 9080
 PORT_2 = 9081
@@ -29,26 +31,17 @@ ADDRS = [ADDR_1, ADDR_2, ADDR_3]
 PORTS = [PORT_1, PORT_2, PORT_3]
 CPORTS = [CPORT_1, CPORT_2, CPORT_3]
 
-# sudo kill -9 $(sudo lsof -t -i :8080)
-
-
 # Machine number
 machine_idx = str(sys.argv[1])
 
-
 # IP address
 IP = ADDRS[int(machine_idx)-1]
-
 
 # Server Port number
 s_port = PORTS[int(machine_idx)-1]
 
 # Client Port number
 c_port = CPORTS[int(machine_idx)-1]
-
-
-# maintains a list of potential clients
-list_of_clients = []
 
 # client username dictionary, with login status: 0 if logged off, corresponding address if logged in
 client_dictionary = {}
@@ -58,7 +51,8 @@ user_state_dictionary = {}
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)                    : "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
+                     : "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -87,25 +81,8 @@ USERFILEPATH = "user" + machine_idx + ".json"
 MSGFILEPATH = "sent" + machine_idx + ".json"
 MSGQPATH = "msg_queue" + machine_idx + ".json"
 
-msg_db = {}
-
-# if os.path.getsize(USERFILEPATH) == 0:
-#     with open(USERFILEPATH, 'w') as f:
-#         json_data = json.dumps(user_state_dictionary)
-#         f.write(json_data)
-#         f.close()
-
-# if os.path.getsize(MSGQPATH) == 0:
-#     with open(MSGQPATH, 'w') as f:
-#         json_data = json.dumps(message_queue)
-#         f.write(json_data)
-#         f.close()
-
-# if os.path.getsize(MSGFILEPATH) == 0:
-#     with open(MSGFILEPATH, 'w') as f:
-#         json_data = json.dumps(msg_db)
-#         f.write(json_data)
-#         f.close()
+files_to_expect = [USERFILEPATH, MSGFILEPATH, MSGQPATH]
+local_to_load = [user_state_dictionary, msg_db, message_queue]
 
 
 def load_db_to_state(path):
@@ -134,15 +111,16 @@ def write(flag):
     except:
         print(f'ERROR: could not write to {file}')
 
-
 # for backup servers, updates server state as if it were interacting with the client, but without sending
+
+
 def handle_message(message, tag=None):
     tag = message[0]
     # Wire protocol for replica interaction is different; need to read out the username relevant to the state change first
     length_of_username = message[1]
     username = message[2:2+length_of_username].decode()
 
-    if tag == 0:
+    if tag == 0 and username != '':
         # acquire lock for client_dictionary, with timeout in case of failure
         dict_lock.acquire(timeout=10)
         if username in user_state_dictionary.keys():
@@ -267,7 +245,7 @@ def clientthread(conn, addr):
                         conn.sendall(bmsg)
                     else:
                         client_dictionary[username] = conn
-                        user_state_dictionary[username] = 1
+                        user_state_dictionary[username] = 0
                         message_queue[username] = []
                         msg_db[username] = []
 
@@ -319,7 +297,6 @@ def clientthread(conn, addr):
                             bmsg = return_tag + message.encode()
                             conn.sendall(bmsg)
                             logged_in = True
-                    print(client_dictionary)
                     dict_lock.release()
 
                 # List Accounts if logged out
@@ -508,9 +485,7 @@ def logout(username):
 def removeconn(connection, username):
     # If connection breaks, automatically logs username out
     logout(username)
-    if connection in list_of_clients:
-        print(f"{connection} has left")
-        list_of_clients.remove(connection)
+    print(f"{username} has left")
 
 
 def match(query):
@@ -648,7 +623,6 @@ def client_interactions():
         if is_Primary == True:
             print("entering client")
             conn, addr = clientserver.accept()
-            list_of_clients.append(conn)
             # creates an individual thread for each machine that connects
             start_new_thread(clientthread, (conn, addr))
 
@@ -658,9 +632,6 @@ def client_interactions():
 # init process:
 global prim_conn
 prim_conn = None
-# backups = [('ip1', 0), ('ip2', 1), ('ip3', 2)]  # change to actual IP
-files_to_expect = [USERFILEPATH, MSGFILEPATH, MSGQPATH]
-local_to_load = [user_state_dictionary, msg_db, message_queue]
 
 
 backupserver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -727,6 +698,7 @@ for idx in replica_dictionary.keys():
                                 buf = min(file_size - byteswritten, 1024)
                                 data = conn_socket.recv(buf)
                                 f.write(data)
+                                print(data)
                                 byteswritten += len(data)
                         if local_to_load is not None and byteswritten != 0:
                             if i == 0:
@@ -743,11 +715,9 @@ for idx in replica_dictionary.keys():
                             elif i == 1:
                                 msg_db = load_db_to_state(
                                     files_to_expect[i])
-                                print(msg_db)
                             elif i == 2:
                                 message_queue = load_db_to_state(
                                     files_to_expect[i])
-                                print(message_queue)
 
                 except Exception as e:
                     print('init error', e)
