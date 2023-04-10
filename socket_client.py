@@ -117,7 +117,7 @@ def process(message, client_logged_in):
         tag = type_tag + recep_tag + recipient
 
     # OPEN UNDELIVERED MESSAGES
-    elif message.find("Open Undelivered Messages") == 0:
+    elif message.find("Dump") == 0:
         if client_logged_in == False:
             print("Currently logged out. Please create an account or login.")
             return

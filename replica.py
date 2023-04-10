@@ -12,9 +12,9 @@ import select
 import threading
 
 NUM_MACHINES = 3
-ADDR_1 = "10.250.11.249"
-ADDR_2 = "10.250.11.249"
-ADDR_3 = "10.250.11.249"
+ADDR_1 = "127.0.0.1"
+ADDR_2 = "127.0.0.1"
+ADDR_3 = "127.0.0.1"
 
 PORT_1 = 9080
 PORT_2 = 9081
@@ -29,14 +29,14 @@ ADDRS = [ADDR_1, ADDR_2, ADDR_3]
 PORTS = [PORT_1, PORT_2, PORT_3]
 CPORTS = [CPORT_1, CPORT_2, CPORT_3]
 
-#sudo kill -9 $(sudo lsof -t -i :8080)
+# sudo kill -9 $(sudo lsof -t -i :8080)
 
 
 # Machine number
 machine_idx = str(sys.argv[1])
 
 
-# IP address 
+# IP address
 IP = ADDRS[int(machine_idx)-1]
 
 
@@ -45,7 +45,6 @@ s_port = PORTS[int(machine_idx)-1]
 
 # Client Port number
 c_port = CPORTS[int(machine_idx)-1]
-
 
 
 # maintains a list of potential clients
@@ -108,36 +107,13 @@ with open(MSGFILEPATH, 'w') as f:
 
 def load_db_to_state(path):
     try:
-        res_dictionary = json.load(path)
-    except:
+        with open(path, 'r') as f:
+            res_dictionary = json.load(f)
+    except Exception as e:
         res_dictionary = {}
+        print(e)
+
     return res_dictionary
-
-
-# def dump_cache(path, cache):
-#     try:
-#         with open(path, 'a', newline='') as file:
-#             # Define the fieldnames for the CSV
-#             fieldnames = cache.keys()
-
-#             # Create the DictWriter object
-#             writer = csv.DictWriter(file, fieldnames=fieldnames)
-
-#             # Write the header row if the file is empty
-#             if file.tell() == 0:
-#                 writer.writeheader()
-
-#             # Iterate over the dictionary of dictionaries
-#             for key1, inner_dict in cache.items():
-#                 for row in inner_dict.values():
-#                     # Add the key1 to the row dictionary
-#                     row['key1'] = key1
-
-#                     # Write the row to the CSV file
-#                     writer.writerow(row)
-#             cache = {}
-#     except FileNotFoundError:
-#         print("db not found")
 
 
 def write(flag):
@@ -166,23 +142,26 @@ def handle_message(message, tag=None):
     if tag == 0:
         # acquire lock for client_dictionary, with timeout in case of failure
         dict_lock.acquire(timeout=10)
-        if username in client_dictionary.keys():
+        if username in user_state_dictionary.keys():
             pass
         else:
             # backup stores username as logged off, as we will automatically log off clients when the server crashes
-            client_dictionary[username] = 0
+            # client_dictionary[username] = 0
             user_state_dictionary[username] = 0
             message_queue[username] = []
+            msg_db[username] = []
             write(0)
+            write(1)
             write(2)
         dict_lock.release()
 
     if tag == 3:
         # deletes the username from backup server state
         dict_lock.acquire(timeout=10)
-        client_dictionary.pop(username)
+        # client_dictionary.pop(username)
         user_state_dictionary.pop(username)
-        message_queue.pop(username)
+        if username in message_queue.keys():
+            message_queue.pop(username)
         write(0)
         dict_lock.release()
 
@@ -195,7 +174,7 @@ def handle_message(message, tag=None):
 
         dict_lock.acquire(timeout=10)
         # Checks if recipeint is actually a possible recipient
-        if recep_username not in client_dictionary.keys():
+        if recep_username not in user_state_dictionary.keys():
             pass
         else:
             queue_tag = message[3+length_of_username+length_of_recep]
@@ -205,10 +184,13 @@ def handle_message(message, tag=None):
             if queue_tag == 0:
                 message_queue[recep_username].append(
                     [username, text_message])
+                write(2)
 
             # If logged in, look up connection in dictionary
             else:
-                write(2)
+                msg_db[recep_username].append(
+                    [username, text_message])
+                write(1)
         dict_lock.release()
 
     if tag == 5:
@@ -218,13 +200,11 @@ def handle_message(message, tag=None):
 
         # current active message_queue is empty in backup state
         msg_db[username].append(message_queue[username])
-        message_queue[username] = 0
+        message_queue[username] = []
         # TO DO: overwrite the persistent store state of the new current message_queue
         write(1)
         write(2)
         dict_lock.release()
-
-
 
 
 def send_to_replicas(message):
@@ -285,6 +265,7 @@ def clientthread(conn, addr):
                         client_dictionary[username] = conn
                         user_state_dictionary[username] = 1
                         message_queue[username] = []
+                        msg_db[username] = []
 
                         # send update to replicas
                         update = (0).to_bytes(1, "big") + (len(username)
@@ -293,6 +274,8 @@ def clientthread(conn, addr):
                         print(client_dictionary)
                         send_to_replicas(update)
                         write(0)
+                        write(1)
+                        write(2)
                         replica_lock.release()
 
                         # response to client
@@ -389,6 +372,7 @@ def clientthread(conn, addr):
                         replica_lock.acquire()
                         send_to_replicas(update)
                         write(0)
+                        write(2)
                         replica_lock.release()
 
                         # update clients
@@ -436,15 +420,12 @@ def clientthread(conn, addr):
                                 new_message = "<"+username+">: " + text_message
                                 try:
 
-                                    # To Do: persistent store this
-
                                     # update replicas
                                     update = (4).to_bytes(1, "big") + (len(username)).to_bytes(1, "big") + username.encode(
                                     ) + message[1:2+length_of_recep] + (1).to_bytes(1, "big") + text_message.encode()
                                     replica_lock.acquire()
                                     send_to_replicas(update)
                                     write(2)
-                                    write(1)
                                     replica_lock.release()
 
                                     return_tag = (1).to_bytes(1, "big")
@@ -472,6 +453,7 @@ def clientthread(conn, addr):
                             return_tag = (1).to_bytes(1, "big")
                             bmsg = return_tag + message.encode()
                             conn.sendall(bmsg)
+                            msg_db[username].append(undelivered)
 
                         # empties the message queue
                         message_queue[username] = []
@@ -481,6 +463,8 @@ def clientthread(conn, addr):
                                                            ).to_bytes(1, "big") + username.encode()
                         replica_lock.acquire()
                         send_to_replicas(update)
+                        write(1)
+                        write(2)
                         replica_lock.release()
 
                     if tag == 6:
@@ -539,81 +523,10 @@ def match(query):
     return message
 
 
-# for backup servers, updates server state as if it were interacting with the client, but without sending
-def handle_message(message, tag=None):
-    tag = message[0]
-    # Wire protocol for replica interaction is different; need to read out the username relevant to the state change first
-    length_of_username = message[1]
-    username = message[2:2+length_of_username].decode()
-
-    if tag == 0:
-        # acquire lock for client_dictionary, with timeout in case of failure
-        dict_lock.acquire(timeout=10)
-        if username in client_dictionary.keys():
-            pass
-        else:
-            # backup stores username as logged off, as we will automatically log off clients when the server crashes
-            client_dictionary[username] = 0
-            user_state_dictionary[username] = 0
-            message_queue[username] = []
-            # update backups
-            write(0)
-            write(2)
-
-        dict_lock.release()
-
-    if tag == 3:
-        # deletes the username from backup server state
-        dict_lock.acquire(timeout=10)
-        client_dictionary.pop(username)
-        user_state_dictionary.pop(username)
-        message_queue.pop(username)
-        dict_lock.release()
-        # persist deletion of user
-        write(0)
-    if tag == 4:
-        # adding messages that have not been sent to the queue
-
-        length_of_recep = message[2+length_of_username]  # convert to int
-        recep_username = message[3+length_of_username:3 +
-                                 length_of_username+length_of_recep].decode()
-
-        dict_lock.acquire(timeout=10)
-        # Checks if recipeint is actually a possible recipient
-        if recep_username not in client_dictionary.keys():
-            pass
-        else:
-            queue_tag = message[3+length_of_username+length_of_recep]
-            text_message = message[4+length_of_username +
-                                   length_of_recep:].decode()
-            # Checks if recipient logged out
-            if queue_tag == 0:
-                message_queue[recep_username].append(
-                    [username, text_message])
-
-            # If logged in, look up connection in dictionary
-            else:
-                write(2)
-        dict_lock.release()
-
-    if tag == 5:
-        # notification that message queue has been read from
-        dict_lock.acquire(timeout=10)
-        # TO DO: for message in message_queue, persistent store the successfully sent message
-
-        # current active message_queue is empty in backup state
-        message_queue[username] = 0
-        write(2)
-        dict_lock.release()
-
-
-
-
-
 def backup_message_handling():
     global is_Primary
     global prim_conn
-    while is_Primary == False:     
+    while is_Primary == False:
         msg = prim_conn.recv(2048)
         if msg:
             handle_message(msg)
@@ -622,13 +535,14 @@ def backup_message_handling():
                 write(i)
 
                 # handle leader election
-                # if this doesnt work, use test sockets that are closed
-                # THIS DOES NOT WORK, REPLICA_CONNECTIONS IS NOT BEING UPDATED
+                # if this doesnt work, use test sockets that are close
             is_Lowest = True
             for i in range(1, int(machine_idx)):
                 try:
-                    # time.sleep((int(machine_idx)-2)*2)
-                    test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    # sleep is janky, need to ensure that 2 becomes primary before 3 connects to 2
+                    time.sleep((int(machine_idx)-2)*2)
+                    test_socket = socket.socket(
+                        socket.AF_INET, socket.SOCK_STREAM)
                     test_socket.connect((ADDRS[i-1], PORTS[i-1]))
                     # test_socket.settimeout(int(machine_idx))
                     test_socket.sendall(int(machine_idx).to_bytes(1, "big"))
@@ -641,10 +555,11 @@ def backup_message_handling():
                     replica_lock.release()
 
                     ret_tag = test_socket.recv(1)[0]
+                    print(ret_tag)
                     if ret_tag == 1:
                         is_Lowest = False
                         prim_conn = replica_connections[str(i)]
-                    
+
                 except ConnectionRefusedError:
                     replica_lock.acquire()
                     if replica_connections[str(i)] != 0:
@@ -667,7 +582,6 @@ def backup_message_handling():
                 is_Primary = True
             print("election done")
             print(is_Primary)
-        
 
 
 def server_interactions():
@@ -685,7 +599,7 @@ def server_interactions():
             # is a reconnecting replica:
             if key in replica_dictionary.keys():
                 replica_lock.acquire()
-                #THIS DOES NOT DISTINGUISH
+                # THIS DOES NOT DISTINGUISH
                 replica_connections[key] = conn
                 replica_lock.release()
                 bmsg = (0).to_bytes(1, "big")
@@ -723,6 +637,7 @@ def server_interactions():
                     except:
                         print('file error')
 
+
 def client_interactions():
     while True:
         # only handles clientside if it is currently the primary
@@ -732,7 +647,6 @@ def client_interactions():
             list_of_clients.append(conn)
             # creates an individual thread for each machine that connects
             start_new_thread(clientthread, (conn, addr))
-
 
 
 # FULL INITIALIZATION
@@ -759,8 +673,15 @@ clientserver.bind((IP, c_port))
 clientserver.listen()
 inputs.append(clientserver)
 for i in range(len(local_to_load)):
-    local_to_load[i] = load_db_to_state(
-        files_to_expect[i])  # persistence for the primary
+    if i == 0:
+        user_state_dictionary = load_db_to_state(
+            files_to_expect[i])  # persistence for the primary
+    elif i == 1:
+        msg_db = load_db_to_state(
+            files_to_expect[i])
+    elif i == 2:
+        message_queue = load_db_to_state(
+            files_to_expect[i])
 
 
 # reaching out
@@ -802,7 +723,23 @@ for idx in replica_dictionary.keys():
                                 f.write(data)
                                 byteswritten += len(data)
                         if local_to_load is not None and byteswritten != 0:
-                            load_db_to_state(files_to_expect[i])
+                            if i == 0:
+                                user_state_dictionary = load_db_to_state(
+                                    files_to_expect[i])
+                                for key in user_state_dictionary.keys():
+                                    user_state_dictionary[key] = 0
+                                write(0)
+                                # persistence for the primary
+                                print(user_state_dictionary)
+                            elif i == 1:
+                                msg_db = load_db_to_state(
+                                    files_to_expect[i])
+                                print(msg_db)
+                            elif i == 2:
+                                message_queue = load_db_to_state(
+                                    files_to_expect[i])
+                                print(message_queue)
+
                 except Exception as e:
                     print('init error', e)
                     traceback.print_exc()
@@ -823,7 +760,7 @@ if primary_exists == False:
     is_Primary = True
 
 print(is_Primary)
-    
+
 # if is_Primary == False:
 #     start_new_thread(backup_message_handling, ())
 
@@ -832,9 +769,5 @@ thread_list = []
 (threading.Thread(target=server_interactions)).start()
 (threading.Thread(target=client_interactions)).start()
 
-
-
-
-            
 
 # does the primary need multiple threads to hear the confirmation from each thread separately?
