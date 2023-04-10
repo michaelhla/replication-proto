@@ -85,19 +85,6 @@ files_to_expect = [USERFILEPATH, MSGFILEPATH, MSGQPATH]
 local_to_load = [user_state_dictionary, msg_db, message_queue]
 
 
-# if os.path.getsize(MSGQPATH) == 0:
-#     with open(MSGQPATH, 'w') as f:
-#         json_data = json.dumps(message_queue)
-#         f.write(json_data)
-#         f.close()
-
-# if os.path.getsize(MSGFILEPATH) == 0:
-#     with open(MSGFILEPATH, 'w') as f:
-#         json_data = json.dumps(msg_db)
-#         f.write(json_data)
-#         f.close()
-
-
 def load_db_to_state(path):
     try:
         with open(path, 'r') as f:
@@ -259,6 +246,7 @@ def clientthread(conn, addr):
                         conn.sendall(bmsg)
                     else:
                         client_dictionary[username] = conn
+                        user_state_dictionary[username] = 0
                         user_state_dictionary[username] = 0
                         message_queue[username] = []
                         msg_db[username] = []
