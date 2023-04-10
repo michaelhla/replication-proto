@@ -12,9 +12,9 @@ import select
 import threading
 
 NUM_MACHINES = 3
-ADDR_1 = "10.250.11.249"
-ADDR_2 = "10.250.11.249"
-ADDR_3 = "10.250.11.249"
+ADDR_1 = "127.0.0.1"
+ADDR_2 = "127.0.0.1"
+ADDR_3 = "127.0.0.1"
 
 PORT_1 = 9080
 PORT_2 = 9081
@@ -58,8 +58,7 @@ user_state_dictionary = {}
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
-                     : "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)                    : "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -150,7 +149,7 @@ def handle_message(message, tag=None):
             pass
         else:
             # backup stores username as logged off, as we will automatically log off clients when the server crashes
-            # client_dictionary[username] = 0
+            client_dictionary[username] = 0
             user_state_dictionary[username] = 0
             message_queue[username] = []
             msg_db[username] = []
@@ -162,7 +161,7 @@ def handle_message(message, tag=None):
     if tag == 3:
         # deletes the username from backup server state
         dict_lock.acquire(timeout=10)
-        # client_dictionary.pop(username)
+        client_dictionary.pop(username)
         user_state_dictionary.pop(username)
         if username in message_queue.keys():
             message_queue.pop(username)
@@ -735,6 +734,9 @@ for idx in replica_dictionary.keys():
                                     files_to_expect[i])
                                 for key in user_state_dictionary.keys():
                                     user_state_dictionary[key] = 0
+                                client_dictionary = user_state_dictionary
+                                print(client_dictionary,
+                                      " this is my client dict")
                                 write(0)
                                 # persistence for the primary
                                 print(user_state_dictionary)
