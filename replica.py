@@ -627,7 +627,7 @@ def backup_message_handling():
             is_Lowest = True
             for i in range(1, int(machine_idx)):
                 try:
-                    # time.sleep((int(machine_idx)-2)*2)
+                    # time.sleep((int(machine_idx)-1)*2)
                     test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     test_socket.connect((ADDRS[i-1], PORTS[i-1]))
                     # test_socket.settimeout(int(machine_idx))
@@ -641,9 +641,14 @@ def backup_message_handling():
                     replica_lock.release()
 
                     ret_tag = test_socket.recv(1)[0]
-                    if ret_tag == 1:
-                        is_Lowest = False
-                        prim_conn = replica_connections[str(i)]
+                    # print(ret_tag)
+                    # print("HUH")
+                    # if ret_tag == 1:
+                        # print(ret_tag)
+                    is_Lowest = False
+                    prim_conn = replica_connections[str(i)]
+                    # print(ret_tag)
+
                     
                 except ConnectionRefusedError:
                     replica_lock.acquire()
