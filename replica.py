@@ -51,8 +51,7 @@ user_state_dictionary = {}
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
-                     : "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2): "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -66,13 +65,10 @@ message_queue = {}
 msg_db = {}
 
 # defined global variable of whether replica is primary or backup
-# global is_Primary
 is_Primary = False
 
-# locks
-dict_lock = Lock()  # client dict
-msg_cache_lock = Lock()
-user_cache_lock = Lock()
+# lock for the message queue
+dict_lock = Lock()
 
 
 # DB OPERATIONS
@@ -118,6 +114,7 @@ def write(flag):
 
 # for backup servers, updates server state as if it were interacting with the client
 # server state only involves creation/deletion of account, plus additions/removals to message queue
+# for each tag, we update the local state and then persist it to the db
 def handle_message(message, tag=None):
     tag = message[0]
     # Wire protocol for replica interaction is different; need to read out the username relevant to the state change first
@@ -236,7 +233,6 @@ def clientthread(conn, addr):
 
                 # account creation
                 if tag == 0:
-                    print('create')
                     username = message[1:]
                     username = username.decode()
                     # If the username is in existence, server asks to retry.
@@ -260,7 +256,7 @@ def clientthread(conn, addr):
                         update = (0).to_bytes(1, "big") + (len(username)
                                                            ).to_bytes(1, "big") + username.encode()
                         replica_lock.acquire()
-                        print(client_dictionary)
+                        # always send to replicas and then persist to own db
                         send_to_replicas(update)
                         write(0)
                         write(1)
@@ -561,7 +557,6 @@ def backup_message_handling():
 
                     # ensures connection to primary, by reciving the return tag
                     ret_tag = test_socket.recv(1)[0]
-                    print(ret_tag)
                     if ret_tag == 1:
                         # there is a smaller machine index still runnning, so still backup
                         is_Lowest = False
@@ -606,8 +601,7 @@ def server_interactions():
             # tells other incoming connections that it is a backup replica, and it receives a machine index
             conn_type = conn.recv(1)
             index_of_connector = conn_type[0]
-            print(index_of_connector)
-            print("backup reception")
+            print(index_of_connector, 'has connected as backup')
             key = str(index_of_connector)
             # is a connecting replica, so the machine index is sent:
             if key in replica_dictionary.keys():
@@ -622,8 +616,6 @@ def server_interactions():
             # still receives a connection, and gets an index of the connector
             conn_type = conn.recv(1)
             index_of_connector = conn_type[0]
-            print(index_of_connector)
-            print("primary reception")
             key = str(index_of_connector)
             # if other replica is connecting:
             if key in replica_dictionary.keys():
@@ -644,7 +636,7 @@ def server_interactions():
                     conn.sendall(size)
                     try:
                         with open(file, 'rb') as sendafile:
-                            # Send the file over the connection
+                            # Send the file over the connection in chunks
                             bytesread = sendafile.read(1024)
                             if not bytesread:
                                 break
@@ -685,7 +677,7 @@ clientserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 clientserver.bind((IP, c_port))
 clientserver.listen()
 inputs.append(clientserver)
-# loads from persistent memory
+# loads from persistent memory for all servers
 for i in range(len(local_to_load)):
     if i == 0:
         user_state_dictionary = load_db_to_state(
@@ -738,7 +730,6 @@ for idx in replica_dictionary.keys():
                                 buf = min(file_size - byteswritten, 1024)
                                 data = conn_socket.recv(buf)
                                 f.write(data)
-                                print(data)
                                 byteswritten += len(data)
                         if local_to_load is not None and byteswritten != 0:
                             if i == 0:
@@ -747,11 +738,8 @@ for idx in replica_dictionary.keys():
                                 for key in user_state_dictionary.keys():
                                     user_state_dictionary[key] = 0
                                 client_dictionary = user_state_dictionary
-                                print(client_dictionary,
-                                      " this is my client dict")
                                 write(0)
                                 # persistence for the primary
-                                print(user_state_dictionary)
                             elif i == 1:
                                 msg_db = load_db_to_state(
                                     files_to_expect[i])
@@ -771,14 +759,13 @@ for idx in replica_dictionary.keys():
             pass
         except Exception as e:
             traceback.print_exc()
-            print('hello')
 
 
 # if no primary exists, default primary
 if primary_exists == False:
     is_Primary = True
 
-print(is_Primary)
+print('is primary:', is_Primary)
 
 # list of threads that are always concurrent
 thread_list = []
