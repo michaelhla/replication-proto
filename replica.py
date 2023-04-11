@@ -13,9 +13,9 @@ import threading
 
 NUM_MACHINES = 3
 
-ADDR_1 = "127.0.0.1"
-ADDR_2 = "127.0.0.1"
-ADDR_3 = "127.0.0.1"
+ADDR_1 = "10.250.11.249"
+ADDR_2 = "10.250.198.80"
+ADDR_3 = "10.250.198.80"
 
 
 PORT_1 = 9080
@@ -51,7 +51,8 @@ user_state_dictionary = {}
 # replica dictionary, keyed by address and valued at machine id
 replica_dictionary = {"1": (ADDR_1, PORT_1), "2": (
     ADDR_2, PORT_2), "3": (ADDR_3, PORT_3)}
-reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)                    : "2", (ADDR_3, PORT_3): "3"}
+reverse_rep_dict = {(ADDR_1, PORT_1): "1", (ADDR_2, PORT_2)
+                     : "2", (ADDR_3, PORT_3): "3"}
 
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
@@ -76,10 +77,11 @@ user_cache_lock = Lock()
 
 # DB OPERATIONS
 
+dbfolder = "dbfolder/"
 
-USERFILEPATH = "user" + machine_idx + ".json"
-MSGFILEPATH = "sent" + machine_idx + ".json"
-MSGQPATH = "msg_queue" + machine_idx + ".json"
+USERFILEPATH = dbfolder + "user" + machine_idx + ".json"
+MSGFILEPATH = dbfolder + "sent" + machine_idx + ".json"
+MSGQPATH = dbfolder + "msg_queue" + machine_idx + ".json"
 
 files_to_expect = [USERFILEPATH, MSGFILEPATH, MSGQPATH]
 local_to_load = [user_state_dictionary, msg_db, message_queue]
@@ -94,6 +96,8 @@ def load_db_to_state(path):
         print(e)
 
     return res_dictionary
+
+# writes are correlated with a flag for each db to write to, pass in db ID to write to file
 
 
 def write(flag):
@@ -202,6 +206,7 @@ def send_to_replicas(message):
 
 
 #  send connections the messages as the client sends them in, with adjusted wire protocol; see design project 1 for more details
+# servers also write to their own state here
 def clientthread(conn, addr):
 
     client_state = True

@@ -36,6 +36,8 @@ CPORTS = [CPORT_1, CPORT_2, CPORT_3]
 dict_lock = Lock()
 replica_lock = Lock()
 
+# testing if response from primary is 1, server goes into backup behavior
+
 # replica connections, that are established, changed to the connection once connected
 replica_connections = {"1": 0, "2": 0, "3": 0}
 

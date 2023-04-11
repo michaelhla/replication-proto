@@ -23,6 +23,8 @@ username = 'mike'
 update = (0).to_bytes(1, "big") + (len(username)
                                    ).to_bytes(1, "big") + username.encode()
 
+# normal handle message behavior
+
 
 def handle_message(message, tag=None):
     tag = message[0]

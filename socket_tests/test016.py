@@ -11,7 +11,7 @@ import json
 import select
 import threading
 
-# edge case for backup message handling, connection refused
+# test writes to file
 
 user_state_dictionary = {}
 client_dictionary = {}
