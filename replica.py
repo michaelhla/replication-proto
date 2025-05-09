@@ -13,9 +13,9 @@ import threading
 
 NUM_MACHINES = 3
 
-ADDR_1 = "10.250.11.249"
-ADDR_2 = "10.250.198.80"
-ADDR_3 = "10.250.198.80"
+ADDR_1 = ""
+ADDR_2 = ""
+ADDR_3 = ""
 
 
 PORT_1 = 9080
